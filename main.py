@@ -57,28 +57,28 @@ def generate_content(raw_keyword, category):
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
-    # 현재 날짜 정보 추가
+    # 현재 날짜 정보 (배경 지식으로만 제공)
     current_date = "2026년 2월 11일"
     
     system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
-오늘은 {current_date}입니다. 최신 정보를 바탕으로 독자에게 실질적인 가치를 주는 고품질 블로그 글을 작성하세요.
+참고용 현재 날짜는 {current_date}입니다. 이 날짜는 정보의 최신성을 판단하는 기준으로만 사용하세요.
 
 [필수 준수 사항]
-1. 주제 집중: 오직 제공된 하나의 키워드에 대해서만 깊이 있게 작성하세요. 무관한 주제를 섞지 마세요.
-2. 인사말 금지: 도입부 자기소개를 절대 하지 마세요. 바로 본론으로 시작합니다.
-3. 분량: 공백 제외 3,000자 이상의 매우 상세한 내용을 작성하세요. 
-4. 구텐베르크 블록 형식: 워드프레스 에디터가 인식할 수 있도록 HTML 주석 블록을 정확하게 사용하세요.
-   - 중요: 주석 내 JSON 데이터는 반드시 유효한 형식이어야 합니다.
+1. 주제 집중: 오직 제공된 하나의 키워드에 대해서만 깊이 있게 작성하세요.
+2. 날짜 언급 금지: 본문 내에 '오늘은 {current_date}입니다' 혹은 '오늘'과 같은 구체적인 날짜 표현을 직접적으로 언급하지 마세요. 
+3. 인사말 금지: 도입부 자기소개나 독자 인사를 절대 하지 마세요. 바로 본론의 정보로 시작합니다.
+4. 분량: 공백 제외 3,000자 이상의 매우 상세한 내용을 작성하세요. 
+5. 구텐베르크 블록 형식: 워드프레스 에디터가 인식할 수 있도록 HTML 주석 블록을 정확하게 사용하세요.
    - 예: <!-- wp:heading {{"level":2}} --><h2>소주제</h2><!-- /wp:heading -->
    - 예: <!-- wp:paragraph --><p>내용...</p><!-- /wp:paragraph -->
-5. SEO 제목: 매력적이고 검색에 유리한 제목을 새로 만드세요.
-6. 태그: 관련 태그 5개를 쉼표(,)로 구분하여 생성하세요.
+6. SEO 제목: 매력적이고 검색에 유리한 제목을 새로 만드세요.
+7. 태그: 관련 태그 5개를 쉼표(,)로 구분하여 생성하세요.
 """
     
     user_query = f"""
 원본 키워드: {raw_keyword}
 
-다음 형식의 JSON으로만 응답하세요. 다른 설명은 포함하지 마세요:
+다음 형식의 JSON으로만 응답하세요:
 {{
   "title": "SEO 최적화 제목",
   "content": "구텐베르크 블록 형식이 적용된 3,000자 이상의 본문",
@@ -102,7 +102,6 @@ def generate_content(raw_keyword, category):
             if response.status_code == 200:
                 result = response.json()
                 text_content = result['candidates'][0]['content']['parts'][0]['text']
-                # 마크다운 백틱 제거 로직 추가
                 clean_json = re.sub(r'^```json\s*|\s*```$', '', text_content.strip(), flags=re.MULTILINE)
                 return json.loads(clean_json)
             elif response.status_code in [429, 500, 502, 503, 504]:
@@ -117,28 +116,68 @@ def generate_content(raw_keyword, category):
             continue
     return None
 
+def get_or_create_tags(base_url, headers, tag_names_str):
+    """태그 이름을 ID로 변환 (없으면 생성)"""
+    if not tag_names_str:
+        return []
+    
+    tag_names = [t.strip() for t in tag_names_str.split(',') if t.strip()]
+    tag_ids = []
+    
+    for name in tag_names:
+        try:
+            # 1. 기존 태그 검색
+            search_url = f"{base_url}/wp-json/wp/v2/tags?search={name}"
+            res = requests.get(search_url, headers=headers, timeout=10)
+            existing_tags = res.json()
+            
+            found = False
+            if isinstance(existing_tags, list):
+                for et in existing_tags:
+                    if et['name'] == name:
+                        tag_ids.append(et['id'])
+                        found = True
+                        break
+            
+            if not found:
+                # 2. 태그가 없으면 생성
+                create_url = f"{base_url}/wp-json/wp/v2/tags"
+                create_res = requests.post(create_url, headers=headers, json={"name": name}, timeout=10)
+                if create_res.status_code in [200, 201]:
+                    tag_ids.append(create_res.json()['id'])
+                elif create_res.status_code == 400: # 이미 존재하지만 검색에 안걸린 경우 등
+                    # 다시 한번 검색 시도
+                    res = requests.get(search_url, headers=headers, timeout=10)
+                    if res.status_code == 200 and res.json():
+                        tag_ids.append(res.json()[0]['id'])
+
+        except Exception as e:
+            print(f"태그 처리 중 오류 ({name}): {e}", flush=True)
+            
+    return tag_ids
+
 def post_to_wp(content_data):
-    """워드프레스 REST API 업로드"""
+    """워드프레스 REST API 업로드 (태그 ID 필드 사용)"""
     base_url = WP_BASE_URL.rstrip('/')
     url = f"{base_url}/wp-json/wp/v2/posts"
     
     auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
     encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
     
-    # 본문 마지막에 태그를 텍스트 형태로 추가하여 발행 (WP API의 tags 필드는 ID 배열만 받기 때문)
-    tags_html = f"\n\n<!-- wp:paragraph --><p>태그: {content_data.get('tags', '')}</p><!-- /wp:paragraph -->"
-    full_content = content_data.get('content', '') + tags_html
-
-    payload = {
-        "title": content_data.get('title', ''),
-        "content": full_content,
-        "excerpt": content_data.get('excerpt', ''),
-        "status": "publish"
-    }
-    
     headers = {
         "Authorization": f"Basic {encoded_auth}",
         "Content-Type": "application/json"
+    }
+
+    # 태그 이름을 ID 리스트로 변환
+    tag_ids = get_or_create_tags(base_url, headers, content_data.get('tags', ''))
+
+    payload = {
+        "title": content_data.get('title', ''),
+        "content": content_data.get('content', ''),
+        "excerpt": content_data.get('excerpt', ''),
+        "tags": tag_ids, # 워드프레스 태그 입력 필드에 적용
+        "status": "publish"
     }
     
     try:
