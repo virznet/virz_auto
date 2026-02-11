@@ -6,14 +6,11 @@ import json
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 
-# 1. 환경 변수 설정 (GitHub Secrets 및 Actions 환경 변수)
+# 1. 환경 변수 설정 (GitHub Secrets에서 불러옴)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
 WP_BASE_URL = "https://virz.net" 
-
-# 수동 실행(테스트 모드) 여부 확인
-IS_MANUAL = os.environ.get('IS_MANUAL', 'false').lower() == 'true'
 
 class NaverScraper:
     """네이버 뉴스 및 블로그 랭킹 수집 클래스"""
@@ -25,21 +22,23 @@ class NaverScraper:
     def get_news_ranking(self, section_id):
         url = f"https://news.naver.com/main/ranking/popularDay.naver?sectionId={section_id}"
         try:
-            res = requests.get(url, headers=self.headers, timeout=10)
+            res = requests.get(url, headers=self.headers, timeout=15)
             soup = BeautifulSoup(res.text, 'html.parser')
             titles = soup.select(".rankingnews_list .list_title")
             return [t.text.strip() for t in titles[:10]]
-        except:
+        except Exception as e:
+            print(f"뉴스 스크래핑 실패 ({section_id}): {e}", flush=True)
             return []
 
     def get_blog_hot_topics(self):
         url = "https://section.blog.naver.com/HotTopicList.naver"
         try:
-            res = requests.get(url, headers=self.headers, timeout=10)
+            res = requests.get(url, headers=self.headers, timeout=15)
             soup = BeautifulSoup(res.text, 'html.parser')
             topics = soup.select(".list_hottopic .desc")
             return [topic.text.strip() for topic in topics[:10]]
-        except:
+        except Exception as e:
+            print(f"블로그 핫토픽 스크래핑 실패: {e}", flush=True)
             return []
 
 def expand_title(keyword, category):
@@ -111,9 +110,10 @@ def generate_content(title, category):
                 time.sleep(delay)
                 continue
             else:
-                print(f"API 오류: {response.status_code} - {response.text}")
+                print(f"API 오류: {response.status_code} - {response.text}", flush=True)
                 break
-        except Exception:
+        except Exception as e:
+            print(f"API 연결 예외 발생: {e}", flush=True)
             time.sleep(delay)
             continue
     return None
@@ -131,15 +131,16 @@ def post_to_wp(title, content):
             url,
             auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD),
             json=payload,
-            timeout=20
+            timeout=30
         )
         return res.status_code == 201
-    except:
+    except Exception as e:
+        print(f"워드프레스 업로드 중 오류: {e}", flush=True)
         return False
 
 def main():
     scraper = NaverScraper()
-    print("🚀 [1단계] 키워드 수집을 시작합니다...")
+    print("🚀 [1단계] 키워드 수집을 시작합니다...", flush=True)
     
     jobs = [
         ("101", "경제/비즈니스"),
@@ -156,44 +157,44 @@ def main():
         time.sleep(1)
 
     if not candidates:
-        print("❌ 수집된 키워드가 없어 프로그램을 종료합니다.")
+        print("❌ 수집된 키워드가 없어 프로그램을 종료합니다.", flush=True)
         return
         
     selected = random.sample(candidates, min(len(candidates), 10))
     
-    print(f"\n📅 [2단계] 오늘 발행할 {len(selected)}개의 글감을 선정했습니다.")
+    print(f"\n📅 [2단계] 오늘 발행할 {len(selected)}개의 글감을 선정했습니다.", flush=True)
     
-    # 수동 실행 시 대기 시간 없이 즉시 발행하도록 설정
-    if IS_MANUAL:
-        print("⚠️ 수동 실행(테스트 모드)이 감지되었습니다. 대기 시간 없이 즉시 발행을 시작합니다.")
-        total_seconds = 0
-    else:
-        total_seconds = 2 * 60 * 60 # 일반 스케줄 실행 시 2시간 분산
-
+    # 2시간(7200초) 범위 내 무작위 발행 시간 계산
+    total_seconds = 2 * 60 * 60
     posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
     
-    if not IS_MANUAL:
-        print(f"⏰ 전체 발행 일정(현재로부터):")
-        for i, pt in enumerate(posting_times):
-            print(f" - {i+1}번 포스팅: 약 {pt//60}분 뒤")
+    print(f"⏰ 전체 발행 예정 일정 (현재 시점 기준):", flush=True)
+    for i, pt in enumerate(posting_times):
+        print(f" - {i+1}번 포스팅: 약 {pt//60}분 뒤", flush=True)
 
     last_wait = 0
     for i, item in enumerate(selected):
         wait_for_next = posting_times[i] - last_wait
         if wait_for_next > 0:
-            print(f"\n⏳ [{i+1}/10] 다음 발행까지 약 {wait_for_next//60}분 {wait_for_next%60}초 대기합니다...")
+            print(f"\n⏳ [{i+1}/10] 다음 발행까지 약 {wait_for_next//60}분 {wait_for_next%60}초 동안 대기 모드에 진입합니다...", flush=True)
+            # 깃허브 액션이 멈춘 것으로 오해하지 않도록 중간중간 하트비트를 찍거나 sleep 합니다.
             time.sleep(wait_for_next)
         
         final_title = expand_title(item['kw'], item['cat'])
-        print(f"📝 [{i+1}/10] 본문 생성 중: {final_title}")
+        print(f"📝 본문 생성 시작: {final_title}", flush=True)
         body = generate_content(final_title, item['cat'])
         
-        if body and post_to_wp(final_title, body):
-            print(f"✅ 발행 완료: {final_title}")
+        if body:
+            if post_to_wp(final_title, body):
+                print(f"✅ 발행 완료: {final_title}", flush=True)
+            else:
+                print(f"❌ 워드프레스 전송 실패: {final_title}", flush=True)
         else:
-            print(f"❌ 발행 실패: {final_title}")
+            print(f"❌ AI 본문 생성 실패: {final_title}", flush=True)
             
         last_wait = posting_times[i]
+
+    print("\n🎉 모든 자동 포스팅 작업이 완료되었습니다.", flush=True)
 
 if __name__ == "__main__":
     main()
