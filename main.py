@@ -4,17 +4,13 @@ import time
 import requests
 import json
 from bs4 import BeautifulSoup
-import google.generativeai as genai
 from requests.auth import HTTPBasicAuth
 
 # 1. 환경 변수 설정 (GitHub Secrets에서 불러옴)
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
 WP_BASE_URL = "https://virz.net" 
-
-# Gemini 설정
-genai.configure(api_key=GEMINI_API_KEY)
 
 class NaverScraper:
     """네이버 뉴스 및 블로그 랭킹 수집 클래스"""
@@ -76,25 +72,53 @@ def expand_title(keyword, category):
     return random.choice(templates)
 
 def generate_content(title, category):
-    """Gemini API를 이용한 본문 생성 (스타일 1: 정보형)"""
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = f"""
-    당신은 {category} 분야 전문 블로거입니다. 
+    """Gemini API를 이용한 본문 생성 (gemini-2.5-flash-preview-09-2025)"""
+    model_id = "gemini-2.5-flash-preview-09-2025"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
+    
+    system_prompt = f"당신은 {category} 분야 전문 블로거입니다. virz.net 블로그에 올릴 SEO 최적화된 블로그 글을 작성하세요."
+    user_query = f"""
     제목: {title}
     
-    위 제목으로 virz.net에 올릴 SEO 최적화된 블로그 글을 작성하세요.
-    - 서론: 독자의 관심을 끄는 도입부
-    - 본론: 3개의 H2 소주제로 상세 설명
-    - 표: 데이터나 특징을 비교하는 마크다운 표(Table)를 반드시 1개 포함
-    - 결론: 내용 요약 및 조언
-    - 말투: 친절하고 전문적인 구어체 (~해요)
-    - 형식: HTML 태그(h2, p, table, tr, td 등)를 사용하여 작성 (마크다운이 아닌 HTML로 출력)
+    [작성 가이드라인]
+    1. 서론: 독자의 관심을 끄는 도입부.
+    2. 본론: 3개의 핵심 소주제(H2 헤딩 사용)로 상세 설명.
+    3. 표: 데이터나 특징을 비교하는 마크다운 표(Table)를 반드시 1개 포함.
+    4. 결론: 내용을 요약하고 독자에게 마지막 조언.
+    5. 말투: 친절하고 전문적인 구어체 (~해요).
+    6. 형식: HTML 태그(h2, p, table, tr, td 등)를 사용하여 작성 (마크다운이 아닌 HTML로 출력).
+    
+    주의: "AI로서 작성한 글입니다"와 같은 문구는 포함하지 마세요.
     """
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except:
-        return None
+    
+    payload = {
+        "contents": [{"parts": [{"text": user_query}]}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]}
+    }
+    
+    # 지수 백오프 적용: 1s, 2s, 4s, 8s, 16s
+    delays = [1, 2, 4, 8, 16]
+    
+    for delay in delays:
+        try:
+            response = requests.post(url, json=payload, timeout=60)
+            if response.status_code == 200:
+                result = response.json()
+                text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text')
+                if text:
+                    return text
+            elif response.status_code in [429, 500, 502, 503, 504]:
+                time.sleep(delay)
+                continue
+            else:
+                print(f"API 오류: {response.status_code} - {response.text}")
+                break
+        except Exception:
+            time.sleep(delay)
+            continue
+            
+    print(f"콘텐츠 생성 실패: 모든 재시도를 소진했습니다.")
+    return None
 
 def post_to_wp(title, content):
     """워드프레스 REST API 업로드"""
@@ -117,7 +141,7 @@ def post_to_wp(title, content):
 
 def main():
     scraper = NaverScraper()
-    print("1. 키워드 수집 중...")
+    print("1. 키워드 수집 시작...")
     
     jobs = [
         ("101", "경제/비즈니스"),
@@ -133,23 +157,27 @@ def main():
             candidates.append({"kw": t, "cat": cat})
         time.sleep(1)
 
-    # 10개 랜덤 선정
+    if not candidates:
+        print("수집된 키워드가 없습니다.")
+        return
+        
     selected = random.sample(candidates, min(len(candidates), 10))
     
     print(f"2. {len(selected)}개의 글을 오전 7시~9시 사이에 랜덤하게 발행합니다.")
     
-    # 오전 7시부터 9시까지(120분 = 7200초)의 타임스탬프 10개 생성 후 정렬
+    # 2시간(7200초) 범위 내 무작위 발행 시간 계산
     total_seconds = 2 * 60 * 60
     posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
     
     last_wait = 0
     for i, item in enumerate(selected):
-        # 다음 발행 시간까지 대기
         wait_for_next = posting_times[i] - last_wait
-        print(f"[{i+1}/10] 다음 발행까지 {wait_for_next}초 대기 중...")
-        time.sleep(wait_for_next)
+        if wait_for_next > 0:
+            print(f"[{i+1}/10] 다음 발행까지 {wait_for_next}초 대기 중...")
+            time.sleep(wait_for_next)
         
         final_title = expand_title(item['kw'], item['cat'])
+        print(f"본문 생성 중: {final_title}")
         body = generate_content(final_title, item['cat'])
         
         if body and post_to_wp(final_title, body):
