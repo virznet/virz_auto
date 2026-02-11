@@ -6,11 +6,15 @@ import json
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 
-# 1. 환경 변수 설정 (GitHub Secrets에서 불러옴)
+# 1. 환경 변수 및 설정
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
 WP_BASE_URL = "https://virz.net" 
+
+# 테스트 모드 설정 (True면 1개만 즉시 발행, False면 10개 랜덤 발행)
+# 깃허브 시크릿에 TEST_MODE를 true로 설정하거나 여기서 직접 True로 바꿔서 테스트하세요.
+IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
 
 class NaverScraper:
     """네이버 뉴스 및 블로그 랭킹 수집 클래스"""
@@ -160,24 +164,27 @@ def main():
         print("❌ 수집된 키워드가 없어 프로그램을 종료합니다.", flush=True)
         return
         
-    selected = random.sample(candidates, min(len(candidates), 10))
-    
-    print(f"\n📅 [2단계] 오늘 발행할 {len(selected)}개의 글감을 선정했습니다.", flush=True)
-    
-    # 2시간(7200초) 범위 내 무작위 발행 시간 계산
-    total_seconds = 2 * 60 * 60
-    posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
-    
-    print(f"⏰ 전체 발행 예정 일정 (현재 시점 기준):", flush=True)
-    for i, pt in enumerate(posting_times):
-        print(f" - {i+1}번 포스팅: 약 {pt//60}분 뒤", flush=True)
+    # 테스트 모드 여부에 따른 개수 및 대기 시간 설정
+    if IS_TEST:
+        print("\n🧪 [테스트 모드 활성화] 1개의 포스팅을 즉시 발행합니다.", flush=True)
+        selected = random.sample(candidates, 1)
+        posting_times = [0] # 즉시 실행
+    else:
+        selected = random.sample(candidates, min(len(candidates), 10))
+        print(f"\n📅 [2단계] 오늘 발행할 {len(selected)}개의 글감을 선정했습니다.", flush=True)
+        # 2시간(7200초) 범위 내 무작위 발행 시간 계산
+        total_seconds = 2 * 60 * 60
+        posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
+        
+        print(f"⏰ 전체 발행 예정 일정 (현재 시점 기준):", flush=True)
+        for i, pt in enumerate(posting_times):
+            print(f" - {i+1}번 포스팅: 약 {pt//60}분 뒤", flush=True)
 
     last_wait = 0
     for i, item in enumerate(selected):
         wait_for_next = posting_times[i] - last_wait
         if wait_for_next > 0:
-            print(f"\n⏳ [{i+1}/10] 다음 발행까지 약 {wait_for_next//60}분 {wait_for_next%60}초 동안 대기 모드에 진입합니다...", flush=True)
-            # 깃허브 액션이 멈춘 것으로 오해하지 않도록 중간중간 하트비트를 찍거나 sleep 합니다.
+            print(f"\n⏳ [{i+1}/{len(selected)}] 다음 발행까지 약 {wait_for_next//60}분 {wait_for_next%60}초 동안 대기합니다...", flush=True)
             time.sleep(wait_for_next)
         
         final_title = expand_title(item['kw'], item['cat'])
@@ -194,7 +201,7 @@ def main():
             
         last_wait = posting_times[i]
 
-    print("\n🎉 모든 자동 포스팅 작업이 완료되었습니다.", flush=True)
+    print("\n🎉 모든 작업이 완료되었습니다.", flush=True)
 
 if __name__ == "__main__":
     main()
