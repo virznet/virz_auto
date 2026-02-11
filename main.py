@@ -4,6 +4,7 @@ import time
 import requests
 import json
 import base64
+import re
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 
@@ -29,7 +30,6 @@ class NaverScraper:
             res = requests.get(url, headers=self.headers, timeout=15)
             soup = BeautifulSoup(res.text, 'html.parser')
             titles = soup.select(".rankingnews_list .list_title")
-            # [단독], [포토] 등 불필요한 머리말 제거 후 수집
             cleaned_titles = []
             for t in titles[:10]:
                 text = t.text.strip()
@@ -57,29 +57,32 @@ def generate_content(raw_keyword, category):
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
+    # 현재 날짜 정보 추가
+    current_date = "2026년 2월 11일"
+    
     system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
-제공된 키워드를 분석하여 독자에게 실질적인 가치를 주는 고품질 블로그 글을 작성하세요.
+오늘은 {current_date}입니다. 최신 정보를 바탕으로 독자에게 실질적인 가치를 주는 고품질 블로그 글을 작성하세요.
 
 [필수 준수 사항]
-1. 주제 집중: 오직 제공된 하나의 키워드에 대해서만 깊이 있게 작성하세요. 다른 무관한 주제를 섞지 마세요.
-2. 인사말 금지: '안녕하세요', '전문 블로거입니다' 같은 도입부나 자기소개를 절대 하지 마세요. 바로 본론의 정보로 시작합니다.
-3. 분량 및 품질: 글자 수 공백 제외 3,000자 이상의 매우 상세한 내용을 작성하세요. 전문 용어 설명과 구체적인 예시를 포함하세요.
-4. 구텐베르크 블록 형식: 워드프레스 에디터가 인식할 수 있도록 HTML 주석 블록을 사용하세요.
+1. 주제 집중: 오직 제공된 하나의 키워드에 대해서만 깊이 있게 작성하세요. 무관한 주제를 섞지 마세요.
+2. 인사말 금지: 도입부 자기소개를 절대 하지 마세요. 바로 본론으로 시작합니다.
+3. 분량: 공백 제외 3,000자 이상의 매우 상세한 내용을 작성하세요. 
+4. 구텐베르크 블록 형식: 워드프레스 에디터가 인식할 수 있도록 HTML 주석 블록을 정확하게 사용하세요.
+   - 중요: 주석 내 JSON 데이터는 반드시 유효한 형식이어야 합니다.
    - 예: <!-- wp:heading {{"level":2}} --><h2>소주제</h2><!-- /wp:heading -->
    - 예: <!-- wp:paragraph --><p>내용...</p><!-- /wp:paragraph -->
-   - 예: <!-- wp:list --><ul><li>...</li></ul><!-- /wp:list -->
-5. SEO 제목: 클릭을 유발하면서도 검색 최적화된 매력적인 제목을 새로 만드세요.
+5. SEO 제목: 매력적이고 검색에 유리한 제목을 새로 만드세요.
 6. 태그: 관련 태그 5개를 쉼표(,)로 구분하여 생성하세요.
 """
     
     user_query = f"""
 원본 키워드: {raw_keyword}
 
-다음 형식의 JSON으로만 응답하세요:
+다음 형식의 JSON으로만 응답하세요. 다른 설명은 포함하지 마세요:
 {{
-  "title": "새로 생성한 매력적인 SEO 제목",
-  "content": "워드프레스 구텐베르크 블록 형식이 적용된 3,000자 이상의 상세 본문",
-  "excerpt": "글의 핵심 내용을 요약한 1~2문장의 요약글",
+  "title": "SEO 최적화 제목",
+  "content": "구텐베르크 블록 형식이 적용된 3,000자 이상의 본문",
+  "excerpt": "핵심 요약 1~2문장",
   "tags": "태그1,태그2,태그3,태그4,태그5"
 }}
 """
@@ -99,12 +102,14 @@ def generate_content(raw_keyword, category):
             if response.status_code == 200:
                 result = response.json()
                 text_content = result['candidates'][0]['content']['parts'][0]['text']
-                return json.loads(text_content)
+                # 마크다운 백틱 제거 로직 추가
+                clean_json = re.sub(r'^```json\s*|\s*```$', '', text_content.strip(), flags=re.MULTILINE)
+                return json.loads(clean_json)
             elif response.status_code in [429, 500, 502, 503, 504]:
                 time.sleep(delay)
                 continue
             else:
-                print(f"API 오류: {response.status_code} - {response.text}", flush=True)
+                print(f"API 오류: {response.status_code}", flush=True)
                 break
         except Exception as e:
             print(f"콘텐츠 생성 중 예외 발생: {e}", flush=True)
@@ -120,9 +125,13 @@ def post_to_wp(content_data):
     auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
     encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
     
+    # 본문 마지막에 태그를 텍스트 형태로 추가하여 발행 (WP API의 tags 필드는 ID 배열만 받기 때문)
+    tags_html = f"\n\n<!-- wp:paragraph --><p>태그: {content_data.get('tags', '')}</p><!-- /wp:paragraph -->"
+    full_content = content_data.get('content', '') + tags_html
+
     payload = {
         "title": content_data.get('title', ''),
-        "content": content_data.get('content', ''),
+        "content": full_content,
         "excerpt": content_data.get('excerpt', ''),
         "status": "publish"
     }
@@ -137,7 +146,7 @@ def post_to_wp(content_data):
         if res.status_code == 201:
             return True
         else:
-            print(f"⚠️ 워드프레스 응답 오류: {res.status_code}", flush=True)
+            print(f"⚠️ 워드프레스 응답 오류: {res.status_code} - {res.text}", flush=True)
             return False
     except Exception as e:
         print(f"❗ 워드프레스 연결 예외: {e}", flush=True)
