@@ -6,11 +6,14 @@ import json
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 
-# 1. 환경 변수 설정 (GitHub Secrets에서 불러옴)
+# 1. 환경 변수 설정 (GitHub Secrets 및 Actions 환경 변수)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
 WP_BASE_URL = "https://virz.net" 
+
+# 수동 실행(테스트 모드) 여부 확인
+IS_MANUAL = os.environ.get('IS_MANUAL', 'false').lower() == 'true'
 
 class NaverScraper:
     """네이버 뉴스 및 블로그 랭킹 수집 클래스"""
@@ -35,7 +38,7 @@ class NaverScraper:
             res = requests.get(url, headers=self.headers, timeout=10)
             soup = BeautifulSoup(res.text, 'html.parser')
             topics = soup.select(".list_hottopic .desc")
-            return [t.text.strip() for t in topics[:10]]
+            return [topic.text.strip() for topic in topics[:10]]
         except:
             return []
 
@@ -96,17 +99,14 @@ def generate_content(title, category):
         "systemInstruction": {"parts": [{"text": system_prompt}]}
     }
     
-    # 지수 백오프 적용: 1s, 2s, 4s, 8s, 16s
     delays = [1, 2, 4, 8, 16]
-    
     for delay in delays:
         try:
             response = requests.post(url, json=payload, timeout=60)
             if response.status_code == 200:
                 result = response.json()
                 text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text')
-                if text:
-                    return text
+                if text: return text
             elif response.status_code in [429, 500, 502, 503, 504]:
                 time.sleep(delay)
                 continue
@@ -116,8 +116,6 @@ def generate_content(title, category):
         except Exception:
             time.sleep(delay)
             continue
-            
-    print(f"콘텐츠 생성 실패: 모든 재시도를 소진했습니다.")
     return None
 
 def post_to_wp(title, content):
@@ -141,7 +139,7 @@ def post_to_wp(title, content):
 
 def main():
     scraper = NaverScraper()
-    print("1. 키워드 수집 시작...")
+    print("🚀 [1단계] 키워드 수집을 시작합니다...")
     
     jobs = [
         ("101", "경제/비즈니스"),
@@ -158,26 +156,36 @@ def main():
         time.sleep(1)
 
     if not candidates:
-        print("수집된 키워드가 없습니다.")
+        print("❌ 수집된 키워드가 없어 프로그램을 종료합니다.")
         return
         
     selected = random.sample(candidates, min(len(candidates), 10))
     
-    print(f"2. {len(selected)}개의 글을 오전 7시~9시 사이에 랜덤하게 발행합니다.")
+    print(f"\n📅 [2단계] 오늘 발행할 {len(selected)}개의 글감을 선정했습니다.")
     
-    # 2시간(7200초) 범위 내 무작위 발행 시간 계산
-    total_seconds = 2 * 60 * 60
+    # 수동 실행 시 대기 시간 없이 즉시 발행하도록 설정
+    if IS_MANUAL:
+        print("⚠️ 수동 실행(테스트 모드)이 감지되었습니다. 대기 시간 없이 즉시 발행을 시작합니다.")
+        total_seconds = 0
+    else:
+        total_seconds = 2 * 60 * 60 # 일반 스케줄 실행 시 2시간 분산
+
     posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
     
+    if not IS_MANUAL:
+        print(f"⏰ 전체 발행 일정(현재로부터):")
+        for i, pt in enumerate(posting_times):
+            print(f" - {i+1}번 포스팅: 약 {pt//60}분 뒤")
+
     last_wait = 0
     for i, item in enumerate(selected):
         wait_for_next = posting_times[i] - last_wait
         if wait_for_next > 0:
-            print(f"[{i+1}/10] 다음 발행까지 {wait_for_next}초 대기 중...")
+            print(f"\n⏳ [{i+1}/10] 다음 발행까지 약 {wait_for_next//60}분 {wait_for_next%60}초 대기합니다...")
             time.sleep(wait_for_next)
         
         final_title = expand_title(item['kw'], item['cat'])
-        print(f"본문 생성 중: {final_title}")
+        print(f"📝 [{i+1}/10] 본문 생성 중: {final_title}")
         body = generate_content(final_title, item['cat'])
         
         if body and post_to_wp(final_title, body):
