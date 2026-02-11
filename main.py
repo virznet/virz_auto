@@ -29,7 +29,14 @@ class NaverScraper:
             res = requests.get(url, headers=self.headers, timeout=15)
             soup = BeautifulSoup(res.text, 'html.parser')
             titles = soup.select(".rankingnews_list .list_title")
-            return [t.text.strip() for t in titles[:10]]
+            # [단독], [포토] 등 불필요한 머리말 제거 후 수집
+            cleaned_titles = []
+            for t in titles[:10]:
+                text = t.text.strip()
+                if ']' in text[:10]:
+                    text = text.split(']', 1)[-1].strip()
+                cleaned_titles.append(text)
+            return cleaned_titles
         except Exception as e:
             print(f"뉴스 스크래핑 실패 ({section_id}): {e}", flush=True)
             return []
@@ -45,64 +52,38 @@ class NaverScraper:
             print(f"블로그 핫토픽 스크래핑 실패: {e}", flush=True)
             return []
 
-def expand_title(keyword, category):
-    """키워드를 매력적인 롱테일 제목으로 확장"""
-    data = {
-        "경제/비즈니스": {
-            "targets": ["직장인", "재테크족", "사회초년생"],
-            "scenarios": ["실질적인 변화", "2026년 정책 분석", "놓치면 안 될 혜택"],
-            "suffixes": ["가이드", "핵심 요약", "주의사항"]
-        },
-        "IT/테크": {
-            "targets": ["얼리어답터", "IT 종사자", "학생"],
-            "scenarios": ["사용 후기", "스펙 비교", "할인 꿀팁"],
-            "suffixes": ["완벽 가이드", "추천 리스트", "솔직 리뷰"]
-        },
-        "패션/뷰티/리빙": {
-            "targets": ["패션 피플", "그루밍족", "자취생", "신혼부부"],
-            "scenarios": ["올해 유행 스타일", "가성비 추천템", "공간 활용법"],
-            "suffixes": ["코디 제안", "트렌드 리포트", "꿀템 리뷰"]
-        }
-    }.get(category, {
-        "targets": ["누구나", "관심 있는 분들"],
-        "scenarios": ["알아야 할 정보", "최신 소식"],
-        "suffixes": ["정리", "근황"]
-    })
-
-    t, s, sx = random.choice(data["targets"]), random.choice(data["scenarios"]), random.choice(data["suffixes"])
-    templates = [
-        f"[{t} 필독] {keyword} {s} {sx}",
-        f"{keyword} {s}, {t}이 꼭 알아야 할 {sx}",
-        f"{t}을 위한 {keyword} {sx}: {s} 포함"
-    ]
-    return random.choice(templates)
-
-def generate_content(title, category):
-    """Gemini API를 이용한 본문 및 메타데이터 생성 (JSON 응답 방식)"""
+def generate_content(raw_keyword, category):
+    """Gemini API를 이용한 제목, 본문, 요약, 태그 통합 생성"""
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
-가독성이 높고 전문적인 정보성 글을 작성하며, 다음 규칙을 반드시 준수하세요:
-1. 절대 '안녕하세요', '독자 여러분' 같은 인사말이나 서론의 자기소개를 포함하지 마세요. 바로 본론으로 들어갑니다.
-2. 오직 하나의 키워드 주계에만 집중하여 깊이 있게 작성하세요. 다른 뉴스 요약과 섞지 마세요.
-3. 약 3,000자 이상의 풍성한 내용을 SEO 원칙에 따라 작성하세요.
-4. 워드프레스 구텐베르크(Gutenberg) 블록 형식(HTML 주석 포함)으로 본문을 구성하세요.
-   예: <!-- wp:heading {{"level":2}} --><h2>...</h2><!-- /wp:heading -->
+제공된 키워드를 분석하여 독자에게 실질적인 가치를 주는 고품질 블로그 글을 작성하세요.
+
+[필수 준수 사항]
+1. 주제 집중: 오직 제공된 하나의 키워드에 대해서만 깊이 있게 작성하세요. 다른 무관한 주제를 섞지 마세요.
+2. 인사말 금지: '안녕하세요', '전문 블로거입니다' 같은 도입부나 자기소개를 절대 하지 마세요. 바로 본론의 정보로 시작합니다.
+3. 분량 및 품질: 글자 수 공백 제외 3,000자 이상의 매우 상세한 내용을 작성하세요. 전문 용어 설명과 구체적인 예시를 포함하세요.
+4. 구텐베르크 블록 형식: 워드프레스 에디터가 인식할 수 있도록 HTML 주석 블록을 사용하세요.
+   - 예: <!-- wp:heading {{"level":2}} --><h2>소주제</h2><!-- /wp:heading -->
+   - 예: <!-- wp:paragraph --><p>내용...</p><!-- /wp:paragraph -->
+   - 예: <!-- wp:list --><ul><li>...</li></ul><!-- /wp:list -->
+5. SEO 제목: 클릭을 유발하면서도 검색 최적화된 매력적인 제목을 새로 만드세요.
+6. 태그: 관련 태그 5개를 쉼표(,)로 구분하여 생성하세요.
 """
     
     user_query = f"""
-제목: {title}
+원본 키워드: {raw_keyword}
 
 다음 형식의 JSON으로만 응답하세요:
 {{
-  "content": "워드프레스 구텐베르크 블록 형식이 적용된 HTML 본문 (약 3000자)",
+  "title": "새로 생성한 매력적인 SEO 제목",
+  "content": "워드프레스 구텐베르크 블록 형식이 적용된 3,000자 이상의 상세 본문",
   "excerpt": "글의 핵심 내용을 요약한 1~2문장의 요약글",
-  "tags": "쉼표로 구분된 관련 태그 5개 (예: 경제,재테크,연금)"
+  "tags": "태그1,태그2,태그3,태그4,태그5"
 }}
 """
     
-    # payload 딕셔너리에서 generationConfig 내 중괄호 에러 수정
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -114,12 +95,11 @@ def generate_content(title, category):
     delays = [1, 2, 4, 8, 16]
     for delay in delays:
         try:
-            response = requests.post(url, json=payload, timeout=90)
+            response = requests.post(url, json=payload, timeout=120)
             if response.status_code == 200:
                 result = response.json()
                 text_content = result['candidates'][0]['content']['parts'][0]['text']
-                data = json.loads(text_content)
-                return data
+                return json.loads(text_content)
             elif response.status_code in [429, 500, 502, 503, 504]:
                 time.sleep(delay)
                 continue
@@ -132,19 +112,16 @@ def generate_content(title, category):
             continue
     return None
 
-def post_to_wp(title, content_data):
-    """워드프레스 REST API 업로드 (요약글 및 태그 포함)"""
+def post_to_wp(content_data):
+    """워드프레스 REST API 업로드"""
     base_url = WP_BASE_URL.rstrip('/')
     url = f"{base_url}/wp-json/wp/v2/posts"
     
     auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
     encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
     
-    # 태그를 문자열 쉼표 구분으로 처리하기 위해 데이터 준비
-    # 워드프레스 기본 API는 숫자 ID 배열을 선호하지만, 본문 하단에 수동으로 추가하거나 
-    # 요약글 필드를 활용하여 SEO를 강화합니다.
     payload = {
-        "title": title,
+        "title": content_data.get('title', ''),
         "content": content_data.get('content', ''),
         "excerpt": content_data.get('excerpt', ''),
         "status": "publish"
@@ -160,7 +137,7 @@ def post_to_wp(title, content_data):
         if res.status_code == 201:
             return True
         else:
-            print(f"⚠️ 워드프레스 응답 오류: {res.status_code} - {res.text}", flush=True)
+            print(f"⚠️ 워드프레스 응답 오류: {res.status_code}", flush=True)
             return False
     except Exception as e:
         print(f"❗ 워드프레스 연결 예외: {e}", flush=True)
@@ -172,7 +149,7 @@ def main():
         return
 
     scraper = NaverScraper()
-    print("🚀 [1단계] 키워드 수집 시작...", flush=True)
+    print("🚀 [1단계] 키워드 수집 및 정제 시작...", flush=True)
     
     jobs = [
         ("101", "경제/비즈니스"),
@@ -189,11 +166,11 @@ def main():
         time.sleep(1)
 
     if not candidates:
-        print("❌ 수집된 키워드 없음.", flush=True)
+        print("❌ 수집된 키워드가 없습니다.", flush=True)
         return
         
     if IS_TEST:
-        print("\n🧪 [테스트 모드] 1개 즉시 발행", flush=True)
+        print("\n🧪 [테스트 모드] 1개 즉시 발행 시도", flush=True)
         selected = random.sample(candidates, 1)
         posting_times = [0]
     else:
@@ -208,22 +185,21 @@ def main():
             print(f"\n⏳ 대기: {wait_for_next//60}분...", flush=True)
             time.sleep(wait_for_next)
         
-        final_title = expand_title(item['kw'], item['cat'])
-        print(f"📝 본문 및 메타데이터 생성 중: {final_title}", flush=True)
+        print(f"📝 콘텐츠 분석 및 생성 중: {item['kw']}", flush=True)
+        content_data = generate_content(item['kw'], item['cat'])
         
-        content_data = generate_content(final_title, item['cat'])
-        
-        if content_data:
-            if post_to_wp(final_title, content_data):
-                print(f"✅ 발행 완료: {final_title}", flush=True)
+        if content_data and content_data.get('title'):
+            print(f"📌 최종 제목: {content_data['title']}", flush=True)
+            if post_to_wp(content_data):
+                print(f"✅ 발행 완료: {content_data['title']}", flush=True)
             else:
-                print(f"❌ 워드프레스 전송 실패", flush=True)
+                print(f"❌ 워드프레스 발행 실패", flush=True)
         else:
-            print(f"❌ AI 생성 실패", flush=True)
+            print(f"❌ AI 콘텐츠 생성 실패", flush=True)
             
         last_wait = posting_times[i]
 
-    print("\n🎉 모든 자동 포스팅 작업이 완료되었습니다.", flush=True)
+    print("\n🎉 모든 자동 포스팅 작업이 성공적으로 종료되었습니다.", flush=True)
 
 if __name__ == "__main__":
     main()
