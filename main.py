@@ -11,7 +11,7 @@ from requests.auth import HTTPBasicAuth
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 WP_USERNAME = os.environ.get('WP_USERNAME')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
-WP_BASE_URL = "https://virz.net" # 본인의 도메인 확인
+WP_BASE_URL = "https://virz.net" 
 
 # Gemini 설정
 genai.configure(api_key=GEMINI_API_KEY)
@@ -119,7 +119,6 @@ def main():
     scraper = NaverScraper()
     print("1. 키워드 수집 중...")
     
-    # 카테고리별 수집
     jobs = [
         ("101", "경제/비즈니스"),
         ("105", "IT/테크"),
@@ -134,23 +133,31 @@ def main():
             candidates.append({"kw": t, "cat": cat})
         time.sleep(1)
 
-    # 수집된 키워드 중 무작위 10개 선정
-    if len(candidates) >= 10:
-        selected = random.sample(candidates, 10)
-    else:
-        selected = candidates
+    # 10개 랜덤 선정
+    selected = random.sample(candidates, min(len(candidates), 10))
     
-    print(f"2. {len(selected)}개 포스팅 시작...")
-    for item in selected:
-        final_title = expand_title(item['kw'], item['cat'])
-        print(f"작성 중: {final_title}")
+    print(f"2. {len(selected)}개의 글을 오전 7시~9시 사이에 랜덤하게 발행합니다.")
+    
+    # 오전 7시부터 9시까지(120분 = 7200초)의 타임스탬프 10개 생성 후 정렬
+    total_seconds = 2 * 60 * 60
+    posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
+    
+    last_wait = 0
+    for i, item in enumerate(selected):
+        # 다음 발행 시간까지 대기
+        wait_for_next = posting_times[i] - last_wait
+        print(f"[{i+1}/10] 다음 발행까지 {wait_for_next}초 대기 중...")
+        time.sleep(wait_for_next)
         
+        final_title = expand_title(item['kw'], item['cat'])
         body = generate_content(final_title, item['cat'])
+        
         if body and post_to_wp(final_title, body):
-            print(f"✅ 완료: {final_title}")
+            print(f"✅ 발행 완료: {final_title}")
         else:
-            print(f"❌ 실패: {final_title}")
-        time.sleep(2) # API 부하 방지
+            print(f"❌ 발행 실패: {final_title}")
+            
+        last_wait = posting_times[i]
 
 if __name__ == "__main__":
     main()
