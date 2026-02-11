@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 
 # 1. 환경 변수 및 설정
+# GitHub Secrets에서 값을 가져옵니다.
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME')
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
@@ -113,37 +114,56 @@ def generate_content(title, category):
             else:
                 print(f"API 오류: {response.status_code} - {response.text}", flush=True)
                 break
-        except Exception as e:
+        except Exception:
             time.sleep(delay)
             continue
     return None
 
 def post_to_wp(title, content):
-    """워드프레스 REST API 업로드 및 카페24용 에러 로깅"""
-    url = f"{WP_BASE_URL}/wp-json/wp/v2/posts"
+    """워드프레스 REST API 업로드 및 상세 에러 로깅"""
+    # URL 끝에 슬래시가 없는지 확인
+    base_url = WP_BASE_URL.rstrip('/')
+    url = f"{base_url}/wp-json/wp/v2/posts"
+    
     payload = {
         "title": title,
         "content": content,
         "status": "publish"
     }
+    
     try:
+        # 카페24 환경 최적화: auth 객체 사용
         res = requests.post(
             url,
             auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD),
             json=payload,
             timeout=30
         )
+        
         if res.status_code == 201:
             return True
         else:
             print(f"⚠️ 워드프레스 응답 오류: 상태코드 {res.status_code}", flush=True)
             print(f"💬 응답 내용: {res.text}", flush=True)
+            
+            if res.status_code == 401:
+                print("\n🚨 [401 인증 오류 해결 체크리스트]", flush=True)
+                print("1. .htaccess 파일에 Authorization 허용 설정이 추가되었나요?", flush=True)
+                print("2. '응용 프로그램 비밀번호'(24자리)를 사용하셨나요? (일반 비밀번호 X)", flush=True)
+                print("3. GitHub Secrets의 WP_APP_PASSWORD에 공백이 포함되지는 않았나요?", flush=True)
+                print("4. 워드프레스 설정 > 고유주소가 '글 이름'으로 되어 있나요?", flush=True)
             return False
+            
     except Exception as e:
-        print(f"❗ 예외 발생: {e}", flush=True)
+        print(f"❗ 워드프레스 연결 중 예외 발생: {e}", flush=True)
         return False
 
 def main():
+    # 시크릿 설정 여부 확인
+    if not WP_USERNAME or not WP_APP_PASSWORD:
+        print("❌ 워드프레스 인증 정보(ID/비밀번호)가 설정되지 않았습니다. GitHub Secrets를 확인하세요.", flush=True)
+        return
+
     scraper = NaverScraper()
     print("🚀 [1단계] 키워드 수집 시작...", flush=True)
     
@@ -162,37 +182,45 @@ def main():
         time.sleep(1)
 
     if not candidates:
-        print("❌ 수집된 키워드 없음.", flush=True)
+        print("❌ 수집된 키워드가 없어 프로그램을 종료합니다.", flush=True)
         return
         
     if IS_TEST:
-        print("\n🧪 [테스트 모드] 1개 즉시 발행", flush=True)
+        print("\n🧪 [테스트 모드 활성화] 1개의 포스팅을 즉시 발행합니다.", flush=True)
         selected = random.sample(candidates, 1)
         posting_times = [0]
     else:
         selected = random.sample(candidates, min(len(candidates), 10))
+        print(f"\n📅 [2단계] 오늘 발행할 {len(selected)}개의 글감을 선정했습니다.", flush=True)
         total_seconds = 2 * 60 * 60
         posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
+        
+        print(f"⏰ 전체 발행 예정 일정 (현재 시점 기준):", flush=True)
+        for i, pt in enumerate(posting_times):
+            print(f" - {i+1}번 포스팅: 약 {pt//60}분 뒤", flush=True)
 
     last_wait = 0
     for i, item in enumerate(selected):
         wait_for_next = posting_times[i] - last_wait
         if wait_for_next > 0:
-            print(f"⏳ 대기: {wait_for_next//60}분", flush=True)
+            print(f"\n⏳ [{i+1}/{len(selected)}] 다음 발행까지 약 {wait_for_next//60}분 {wait_for_next%60}초 대기합니다...", flush=True)
             time.sleep(wait_for_next)
         
         final_title = expand_title(item['kw'], item['cat'])
-        print(f"📝 생성: {final_title}", flush=True)
+        print(f"📝 본문 생성 시작: {final_title}", flush=True)
         body = generate_content(final_title, item['cat'])
         
         if body:
             if post_to_wp(final_title, body):
-                print(f"✅ 완료: {final_title}", flush=True)
+                print(f"✅ 발행 완료: {final_title}", flush=True)
             else:
-                print(f"❌ 전송 실패", flush=True)
+                print(f"❌ 워드프레스 전송 실패", flush=True)
         else:
-            print(f"❌ AI 생성 실패", flush=True)
+            print(f"❌ AI 본문 생성 실패", flush=True)
+            
         last_wait = posting_times[i]
+
+    print("\n🎉 모든 자동 포스팅 작업이 완료되었습니다.", flush=True)
 
 if __name__ == "__main__":
     main()
