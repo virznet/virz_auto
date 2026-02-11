@@ -102,12 +102,13 @@ def generate_content(title, category):
 }}
 """
     
+    # payload 딕셔너리에서 generationConfig 내 중괄호 에러 수정
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "generationConfig": {{
+        "generationConfig": {
             "responseMimeType": "application/json"
-        }}
+        }
     }
     
     delays = [1, 2, 4, 8, 16]
@@ -116,13 +117,14 @@ def generate_content(title, category):
             response = requests.post(url, json=payload, timeout=90)
             if response.status_code == 200:
                 result = response.json()
-                data = json.loads(result['candidates'][0]['content']['parts'][0]['text'])
+                text_content = result['candidates'][0]['content']['parts'][0]['text']
+                data = json.loads(text_content)
                 return data
             elif response.status_code in [429, 500, 502, 503, 504]:
                 time.sleep(delay)
                 continue
             else:
-                print(f"API 오류: {response.status_code}", flush=True)
+                print(f"API 오류: {response.status_code} - {response.text}", flush=True)
                 break
         except Exception as e:
             print(f"콘텐츠 생성 중 예외 발생: {e}", flush=True)
@@ -138,8 +140,9 @@ def post_to_wp(title, content_data):
     auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
     encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
     
-    # 워드프레스 기본 API는 태그 이름 문자열을 직접 받지 않고 ID를 요구하는 경우가 많습니다.
-    # 하지만 쉼표 구분 문자열을 메타데이터나 특정 플러그인 필드로 활용할 수 있도록 구성합니다.
+    # 태그를 문자열 쉼표 구분으로 처리하기 위해 데이터 준비
+    # 워드프레스 기본 API는 숫자 ID 배열을 선호하지만, 본문 하단에 수동으로 추가하거나 
+    # 요약글 필드를 활용하여 SEO를 강화합니다.
     payload = {
         "title": title,
         "content": content_data.get('content', ''),
@@ -157,7 +160,7 @@ def post_to_wp(title, content_data):
         if res.status_code == 201:
             return True
         else:
-            print(f"⚠️ 워드프레스 응답 오류: {res.status_code}", flush=True)
+            print(f"⚠️ 워드프레스 응답 오류: {res.status_code} - {res.text}", flush=True)
             return False
     except Exception as e:
         print(f"❗ 워드프레스 연결 예외: {e}", flush=True)
@@ -208,7 +211,6 @@ def main():
         final_title = expand_title(item['kw'], item['cat'])
         print(f"📝 본문 및 메타데이터 생성 중: {final_title}", flush=True)
         
-        # 이제 generate_content는 본문, 요약, 태그가 담긴 dict를 반환합니다.
         content_data = generate_content(final_title, item['cat'])
         
         if content_data:
