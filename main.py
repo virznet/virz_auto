@@ -3,14 +3,15 @@ import random
 import time
 import requests
 import json
+import base64
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 
 # 1. 환경 변수 및 설정
-# GitHub Secrets에서 값을 가져옵니다.
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-WP_USERNAME = os.environ.get('WP_USERNAME')
-WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD')
+WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
+# 응용 프로그램 비밀번호의 공백을 완전히 제거하여 처리합니다.
+WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
 WP_BASE_URL = "https://virz.net" 
 
 # 테스트 모드 설정 (True면 1개만 즉시 발행, False면 10개 랜덤 발행)
@@ -120,10 +121,18 @@ def generate_content(title, category):
     return None
 
 def post_to_wp(title, content):
-    """워드프레스 REST API 업로드 및 상세 에러 로깅"""
-    # URL 끝에 슬래시가 없는지 확인
+    """워드프레스 REST API 업로드 및 카페24 최적화 인증 방식"""
     base_url = WP_BASE_URL.rstrip('/')
     url = f"{base_url}/wp-json/wp/v2/posts"
+    
+    # 카페24 등 일부 호스팅에서 Basic Auth를 더 확실히 전달하기 위해 헤더를 직접 구성합니다.
+    auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
+    encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
+    
+    headers = {
+        "Authorization": f"Basic {encoded_auth}",
+        "Content-Type": "application/json"
+    }
     
     payload = {
         "title": title,
@@ -132,10 +141,9 @@ def post_to_wp(title, content):
     }
     
     try:
-        # 카페24 환경 최적화: auth 객체 사용
         res = requests.post(
             url,
-            auth=HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD),
+            headers=headers,
             json=payload,
             timeout=30
         )
@@ -147,11 +155,10 @@ def post_to_wp(title, content):
             print(f"💬 응답 내용: {res.text}", flush=True)
             
             if res.status_code == 401:
-                print("\n🚨 [401 인증 오류 해결 체크리스트]", flush=True)
-                print("1. .htaccess 파일에 Authorization 허용 설정이 추가되었나요?", flush=True)
-                print("2. '응용 프로그램 비밀번호'(24자리)를 사용하셨나요? (일반 비밀번호 X)", flush=True)
-                print("3. GitHub Secrets의 WP_APP_PASSWORD에 공백이 포함되지는 않았나요?", flush=True)
-                print("4. 워드프레스 설정 > 고유주소가 '글 이름'으로 되어 있나요?", flush=True)
+                print("\n🚨 [401 인증 오류 최종 점검 리스트]", flush=True)
+                print(f"1. 입력된 사용자명: {WP_USERNAME} (워드프레스 로그인 ID와 정확히 일치하는지 확인)", flush=True)
+                print("2. 응용 프로그램 비밀번호: 24자리 영문/숫자 (일반 로그인 비밀번호 절대 아님)", flush=True)
+                print("3. .htaccess 설정: 이미 수정하셨다면 서버 캐시나 웹방화벽 차단 여부를 확인해야 합니다.", flush=True)
             return False
             
     except Exception as e:
@@ -159,9 +166,8 @@ def post_to_wp(title, content):
         return False
 
 def main():
-    # 시크릿 설정 여부 확인
     if not WP_USERNAME or not WP_APP_PASSWORD:
-        print("❌ 워드프레스 인증 정보(ID/비밀번호)가 설정되지 않았습니다. GitHub Secrets를 확인하세요.", flush=True)
+        print("❌ 워드프레스 인증 정보가 설정되지 않았습니다.", flush=True)
         return
 
     scraper = NaverScraper()
@@ -182,7 +188,7 @@ def main():
         time.sleep(1)
 
     if not candidates:
-        print("❌ 수집된 키워드가 없어 프로그램을 종료합니다.", flush=True)
+        print("❌ 수집된 키워드가 없습니다.", flush=True)
         return
         
     if IS_TEST:
@@ -194,10 +200,6 @@ def main():
         print(f"\n📅 [2단계] 오늘 발행할 {len(selected)}개의 글감을 선정했습니다.", flush=True)
         total_seconds = 2 * 60 * 60
         posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
-        
-        print(f"⏰ 전체 발행 예정 일정 (현재 시점 기준):", flush=True)
-        for i, pt in enumerate(posting_times):
-            print(f" - {i+1}번 포스팅: 약 {pt//60}분 뒤", flush=True)
 
     last_wait = 0
     for i, item in enumerate(selected):
