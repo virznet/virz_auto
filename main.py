@@ -163,7 +163,7 @@ def generate_article(keyword, category, internal_posts, user_links):
 - 응답은 반드시 유효한 JSON 형식이어야 합니다.
 - JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 - 본문 내용은 워드프레스 구텐베르크 블록(HTML 주석 형식)을 사용해야 합니다.
-- 모든 이중 따옴표(")는 백슬래시(\")를 사용해 올바르게 이스케이프 처리하세요.
+- 중요: 텍스트 내의 모든 이중 따옴표(")는 백슬래시(\")를 사용해 반드시 이스케이프 처리하세요.
 - 인사말, 날짜 언급 없이 바로 본론으로 시작하세요.
 """
     
@@ -182,22 +182,29 @@ def generate_article(keyword, category, internal_posts, user_links):
         if res.status_code == 200:
             raw_response = res.json()['candidates'][0]['content']['parts'][0]['text']
             
-            # JSON 데이터 정제 로직 (안전한 추출)
+            # JSON 데이터 정제 로직 (안전한 추출 및 제어 문자 제거)
             json_str = raw_response.strip()
             
-            # 마크다운 백틱 기호가 포함된 경우 제거 (중단 방지를 위해 {3} 패턴 사용)
+            # 마크다운 백틱 제거 (정규표현식을 이용해 중단 방지)
             if json_str.startswith("`" * 3):
                 json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                 json_str = re.sub(r'\s*`{3}$', '', json_str)
             
+            # JSON 파싱을 방해하는 특수 제어 문자 제거
+            json_str = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
+            
             try:
                 return json.loads(json_str)
-            except json.JSONDecodeError:
-                # 1차 파싱 실패 시 중괄호 매칭으로 재시도
-                match = re.search(r'\{.*\}', json_str, re.DOTALL)
+            except json.JSONDecodeError as e:
+                print(f"⚠️ JSON 파싱 1차 실패 ({e}). 재정제 시도 중...", flush=True)
+                # 중괄호 { } 사이의 내용만 추출하여 재시도
+                match = re.search(r'(\{.*\})', json_str, re.DOTALL)
                 if match:
-                    return json.loads(match.group())
-                raise
+                    try:
+                        return json.loads(match.group(1))
+                    except:
+                        pass
+                raise e
     except Exception as e:
         print(f"AI 콘텐츠 생성 실패: {e}", flush=True)
     return None
