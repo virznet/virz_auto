@@ -5,299 +5,250 @@ import requests
 import json
 import base64
 import re
+import io
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
+from PIL import Image
 
-# 1. 환경 변수 및 설정
+# ==========================================
+# 1. 환경 변수 및 설정 (2026-02-13 기준)
+# ==========================================
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
 WP_BASE_URL = "https://virz.net" 
 
-# 테스트 모드 설정 (True면 1개만 즉시 발행, False면 10개 랜덤 발행)
+# 테스트 모드 설정 (시크릿에서 TEST_MODE를 true로 설정 시 1개만 즉시 발행)
 IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
 
+# ==========================================
+# 2. 데이터 로드 및 수집
+# ==========================================
+def load_external_links():
+    """links.json 파일에서 사용자 정의 링크를 불러옵니다."""
+    file_path = "links.json"
+    default_links = [{"title": "virz.net", "url": "https://virz.net"}]
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if data else default_links
+        except Exception as e:
+            print(f"⚠️ links.json 로드 실패: {e}", flush=True)
+            return default_links
+    return default_links
+
 class NaverScraper:
-    """네이버 뉴스 및 블로그 랭킹 수집 클래스"""
     def __init__(self):
-        self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-        }
+        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"}
 
     def get_news_ranking(self, section_id):
-        url = f"https://news.naver.com/main/ranking/popularDay.naver?sectionId={section_id}"
         try:
-            res = requests.get(url, headers=self.headers, timeout=15)
+            res = requests.get(f"https://news.naver.com/main/ranking/popularDay.naver?sectionId={section_id}", headers=self.headers, timeout=15)
+            res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
-            titles = soup.select(".rankingnews_list .list_title")
-            cleaned_titles = []
-            for t in titles[:10]:
-                text = t.text.strip()
-                if ']' in text[:10]:
-                    text = text.split(']', 1)[-1].strip()
-                cleaned_titles.append(text)
-            return cleaned_titles
+            return [t.text.strip() for t in soup.select(".rankingnews_list .list_title")[:10]]
         except Exception as e:
-            print(f"뉴스 스크래핑 실패 ({section_id}): {e}", flush=True)
+            print(f"뉴스 수집 오류: {e}", flush=True)
             return []
 
     def get_blog_hot_topics(self):
-        url = "https://section.blog.naver.com/HotTopicList.naver"
         try:
-            res = requests.get(url, headers=self.headers, timeout=15)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            topics = soup.select(".list_hottopic .desc")
-            return [topic.text.strip() for topic in topics[:10]]
+            res = requests.get("https://section.blog.naver.com/HotTopicList.naver", headers=self.headers, timeout=15)
+            res.encoding = 'utf-8'
+            return [t.text.strip() for t in BeautifulSoup(res.text, 'html.parser').select(".list_hottopic .desc")[:10]]
         except Exception as e:
-            print(f"블로그 핫토픽 스크래핑 실패: {e}", flush=True)
+            print(f"블로그 수집 오류: {e}", flush=True)
             return []
 
-def generate_content(raw_keyword, category):
-    """Gemini API를 이용한 제목, 본문, 요약, 태그, 이미지 프롬프트 통합 생성 (외부 링크 포함)"""
+# ==========================================
+# 3. 워드프레스 & 이미지 최적화 (JPG 70%)
+# ==========================================
+def get_recent_posts():
+    """내부 링크용 최근 포스트 목록 가져오기"""
+    try:
+        res = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=10&_fields=title,link", timeout=10)
+        if res.status_code == 200:
+            return [{"title": p['title']['rendered'], "link": p['link']} for p in res.json()]
+    except Exception as e:
+        print(f"최근 포스트 로드 오류: {e}", flush=True)
+    return []
+
+def generate_image_process(prompt):
+    """Gemini 2.5 Flash Image를 사용하여 썸네일 생성 및 JPG 70% 압축"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key={GEMINI_API_KEY}"
+    
+    # 글자가 없는 순수 이미지를 위한 프롬프트 강화
+    final_prompt = f"Professional photography for: {prompt}. High resolution, 8k, cinematic lighting. Strictly NO TEXT, NO LETTERS, NO WORDS, NO FONTS."
+    
+    payload = {
+        "contents": [{"parts": [{"text": final_prompt}]}],
+        "generationConfig": {"responseModalities": ["IMAGE"]}
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=150)
+        if response.status_code == 200:
+            result = response.json()
+            inline_data = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('inlineData', {}).get('data')
+            if inline_data:
+                img_data = base64.b64decode(inline_data)
+                
+                # 이미지 압축 처리 (Pillow)
+                img = Image.open(io.BytesIO(img_data))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                out = io.BytesIO()
+                img.save(out, format='JPEG', quality=70, optimize=True)
+                return out.getvalue()
+        print(f"이미지 생성 실패 (상태코드): {response.status_code}", flush=True)
+    except Exception as e:
+        print(f"이미지 생성 중 예외 발생: {e}", flush=True)
+    return None
+
+def upload_to_wp_media(img_data):
+    """워드프레스 미디어 라이브러리 업로드"""
+    url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media"
+    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
+    headers = {
+        "Content-Disposition": f"attachment; filename=feat_{int(time.time())}.jpg",
+        "Content-Type": "image/jpeg"
+    }
+    try:
+        res = requests.post(url, auth=auth, headers=headers, data=img_data, timeout=60)
+        if res.status_code == 201:
+            return res.json()['id']
+    except Exception as e:
+        print(f"미디어 업로드 실패: {e}", flush=True)
+    return None
+
+# ==========================================
+# 4. 스마트 콘텐츠 생성 (지능형 링크 분산)
+# ==========================================
+def generate_article(keyword, category, internal_posts, user_links):
+    """지능형 링크 전략이 적용된 3,000자 포스팅 생성"""
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
-    current_date = "2026년 2월 11일"
+    # 내부 링크 후보
+    internal_ref = "내 블로그 추천글:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in internal_posts]) if internal_posts else ""
     
-    system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
-참고용 현재 날짜는 {current_date}입니다. 이 날짜는 정보의 최신성을 판단하는 기준으로만 사용하세요.
+    # 사용자 외부 링크 랜덤 2개 선택
+    selected_ext = random.sample(user_links, min(len(user_links), 2))
+    user_ext_ref = "본문 중간 삽입용 외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
-[필수 준수 사항]
-1. 주제 집중: 오직 제공된 하나의 키워드에 대해서만 깊이 있게 작성하세요.
-2. 날짜 및 인사말 금지: 본문 내에 날짜나 도입부 인사를 절대 포함하지 마세요.
-3. 분량: 공백 제외 3,000자 이상의 매우 상세한 내용을 작성하세요. 
-4. 구텐베르크 블록 형식: 워드프레스 에디터가 인식할 수 있도록 HTML 주석 블록을 정확하게 사용하세요.
-5. 이미지 프롬프트: 글의 주제를 상징하는 예술적인 대표 이미지를 위한 프롬프트를 영어로 작성하세요. 
-   - 규칙: 반드시 "Professional photography style, high resolution, no text, no letters, no words"라는 문구를 포함하세요.
-6. SEO 외부 링크(External Link): 본문 중간 혹은 하단에 주제와 관련된 권위 있는 외부 사이트(뉴스, 백과사전, 공식 기관 등)로 연결되는 링크를 최소 1개 포함하세요.
-   - 링크는 가독성 좋게 일반 텍스트 하이퍼링크로 넣거나, 버튼 형식 블록을 사용하세요.
-   - 버튼 예시: <!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="URL">관련 정보 자세히 보기</a></div><!-- /wp:button --></div><!-- /wp:buttons -->
+    system_prompt = f"""당신은 {category} 분야 전문 SEO 블로거입니다. 
+키워드 '{keyword}'에 대해 3,000자 이상의 깊이 있는 정보를 제공하세요.
+
+[SEO 링크 분산 배치 전략]
+1. 내부 링크(1개): 제공된 내 블로그 글 중 하나를 본문의 첫 번째 H2 섹션 이후에 자연스럽게 삽입하세요.
+2. 사용자 지정 외부 링크(2개): 제공된 링크들을 본문 중간중간(H2~H3 섹션 사이)에 분산 배치하세요. 하나는 텍스트 링크, 하나는 버튼 블록으로 만드세요.
+3. AI 권위 외부 링크(1개): 주제와 관련된 위키백과나 공식 뉴스 URL을 당신이 직접 찾아 본문 하단에 추가하세요.
+
+[필수 사항]
+- 인사말, 날짜, 자기소개 금지. 바로 본론 시작.
+- 구텐베르크 블록(HTML 주석) 형식을 완벽히 준수할 것.
+- 썸네일용 영문 프롬프트 (글자/숫자 배제 강조).
 """
     
-    user_query = f"""
-원본 키워드: {raw_keyword}
-
-다음 형식의 JSON으로만 응답하세요:
-{{
-  "title": "SEO 최적화 제목",
-  "content": "구텐베르크 블록 형식이 적용된 3,000자 이상의 본문 (관련 외부 링크 버튼 포함)",
-  "excerpt": "핵심 요약 1~2문장",
-  "tags": "태그1,태그2,태그3,태그4,태그5",
-  "image_prompt": "이미지 생성을 위한 상세한 영어 프롬프트 (텍스트 없이 사진 스타일)"
-}}
-"""
+    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n위 링크들을 본문에 자연스럽게 녹여서 JSON으로 응답하세요."
     
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "generationConfig": {
-            "responseMimeType": "application/json"
-        }
+        "generationConfig": {"responseMimeType": "application/json"}
     }
     
-    delays = [1, 2, 4, 8, 16]
-    for delay in delays:
-        try:
-            response = requests.post(url, json=payload, timeout=120)
-            if response.status_code == 200:
-                result = response.json()
-                text_content = result['candidates'][0]['content']['parts'][0]['text']
-                clean_json = re.sub(r'^```json\s*|\s*```$', '', text_content.strip(), flags=re.MULTILINE)
-                return json.loads(clean_json)
-            elif response.status_code in [429, 500, 502, 503, 504]:
-                time.sleep(delay)
-                continue
-            else:
-                print(f"Gemini API 오류: {response.status_code}", flush=True)
-                break
-        except Exception as e:
-            print(f"콘텐츠 생성 중 예외 발생: {e}", flush=True)
-            time.sleep(delay)
-            continue
+    try:
+        res = requests.post(url, json=payload, timeout=180)
+        if res.status_code == 200:
+            raw = res.json()['candidates'][0]['content']['parts'][0]['text']
+            return json.loads(re.search(r'\{.*\}', raw, re.DOTALL).group())
+    except Exception as e:
+        print(f"콘텐츠 생성 실패: {e}", flush=True)
     return None
 
-def generate_featured_image(image_prompt):
-    """Imagen 4.0을 사용하여 대표 이미지 생성"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
-    
-    payload = {
-        "instances": [{"prompt": image_prompt}],
-        "parameters": {"sampleCount": 1}
-    }
-    
-    try:
-        response = requests.post(url, json=payload, timeout=120)
-        if response.status_code == 200:
-            result = response.json()
-            b64_data = result['predictions'][0]['bytesBase64Encoded']
-            return base64.b64decode(b64_data)
-        else:
-            print(f"이미지 생성 API 오류: {response.status_code}", flush=True)
-            return None
-    except Exception as e:
-        print(f"이미지 생성 중 예외 발생: {e}", flush=True)
-        return None
-
-def upload_media_to_wp(image_bytes, filename):
-    """워드프레스 미디어 라이브러리에 이미지 업로드"""
-    base_url = WP_BASE_URL.rstrip('/')
-    url = f"{base_url}/wp-json/wp/v2/media"
-    
-    auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
-    encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
-    
-    headers = {
-        "Authorization": f"Basic {encoded_auth}",
-        "Content-Disposition": f"attachment; filename={filename}",
-        "Content-Type": "image/png"
-    }
-    
-    try:
-        res = requests.post(url, headers=headers, data=image_bytes, timeout=60)
-        if res.status_code == 201:
-            return res.json()['id']
-        else:
-            print(f"미디어 업로드 오류: {res.status_code}", flush=True)
-            return None
-    except Exception as e:
-        print(f"미디어 업로드 중 예외 발생: {e}", flush=True)
-        return None
-
-def get_or_create_tags(base_url, headers, tag_names_str):
-    """태그 이름을 ID로 변환 (없으면 생성)"""
-    if not tag_names_str:
-        return []
-    
-    tag_names = [t.strip() for t in tag_names_str.split(',') if t.strip()]
-    tag_ids = []
-    
-    for name in tag_names:
-        try:
-            search_url = f"{base_url}/wp-json/wp/v2/tags?search={name}"
-            res = requests.get(search_url, headers=headers, timeout=10)
-            existing_tags = res.json()
-            
-            found = False
-            if isinstance(existing_tags, list):
-                for et in existing_tags:
-                    if et['name'] == name:
-                        tag_ids.append(et['id'])
-                        found = True
-                        break
-            
-            if not found:
-                create_url = f"{base_url}/wp-json/wp/v2/tags"
-                create_res = requests.post(create_url, headers=headers, json={"name": name}, timeout=10)
-                if create_res.status_code in [200, 201]:
-                    tag_ids.append(create_res.json()['id'])
-        except Exception as e:
-            print(f"태그 처리 중 오류 ({name}): {e}", flush=True)
-            
-    return tag_ids
-
-def post_to_wp(content_data, featured_media_id=None):
-    """워드프레스 REST API 업로드 (특성 이미지 및 태그 포함)"""
-    base_url = WP_BASE_URL.rstrip('/')
-    url = f"{base_url}/wp-json/wp/v2/posts"
-    
-    auth_str = f"{WP_USERNAME}:{WP_APP_PASSWORD}"
-    encoded_auth = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
-    
-    headers = {
-        "Authorization": f"Basic {encoded_auth}",
-        "Content-Type": "application/json"
-    }
-
-    tag_ids = get_or_create_tags(base_url, headers, content_data.get('tags', ''))
-
-    payload = {
-        "title": content_data.get('title', ''),
-        "content": content_data.get('content', ''),
-        "excerpt": content_data.get('excerpt', ''),
-        "tags": tag_ids,
-        "status": "publish"
-    }
-    
-    if featured_media_id:
-        payload["featured_media"] = featured_media_id
-    
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=30)
-        if res.status_code == 201:
-            return True
-        else:
-            print(f"⚠️ 워드프레스 응답 오류: {res.status_code} - {res.text}", flush=True)
-            return False
-    except Exception as e:
-        print(f"❗ 워드프레스 연결 예외: {e}", flush=True)
-        return False
-
+# ==========================================
+# 5. 실행 및 제어
+# ==========================================
 def main():
-    if not WP_USERNAME or not WP_APP_PASSWORD:
-        print("❌ 인증 정보가 부족합니다.", flush=True)
-        return
+    if not GEMINI_API_KEY: 
+        print("❌ GEMINI_API_KEY가 없습니다.", flush=True); return
 
+    # 1. 링크 리스트 로드
+    user_links = load_external_links()
+    recent_posts = get_recent_posts()
+    
     scraper = NaverScraper()
-    print("🚀 [1단계] 키워드 수집 및 정제 시작...", flush=True)
+    print("🚀 SEO 지능형 엔진 기동: 실시간 트렌드 분석 중...", flush=True)
     
-    jobs = [
-        ("101", "경제/비즈니스"),
-        ("105", "IT/테크"),
-        ("103", "패션/뷰티/리빙"),
-        (None, "일반/생활")
-    ]
-    
-    candidates = []
+    # 2. 키워드 수집
+    jobs = [("101", "경제"), ("105", "IT/테크"), ("103", "생활/문화"), (None, "일반")]
+    pool = []
     for sid, cat in jobs:
-        titles = scraper.get_news_ranking(sid) if sid else scraper.get_blog_hot_topics()
-        for t in titles[:5]:
-            candidates.append({"kw": t, "cat": cat})
+        items = scraper.get_news_ranking(sid) if sid else scraper.get_blog_hot_topics()
+        for i in items[:3]: pool.append({"kw": i, "cat": cat})
         time.sleep(1)
 
-    if not candidates:
-        print("❌ 수집된 키워드가 없습니다.", flush=True)
-        return
+    if not pool: return
+    
+    # 3. 타겟 선정
+    targets = random.sample(pool, 1) if IS_TEST else random.sample(pool, min(len(pool), 10))
+    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
+    
+    for idx, item in enumerate(targets):
+        print(f"📝 [{idx+1}/{len(targets)}] '{item['kw']}' 지능형 포스팅 생성...", flush=True)
         
-    if IS_TEST:
-        print("\n🧪 [테스트 모드] 1개 즉시 발행 시도", flush=True)
-        selected = random.sample(candidates, 1)
-        posting_times = [0]
-    else:
-        selected = random.sample(candidates, min(len(candidates), 10))
-        total_seconds = 2 * 60 * 60
-        posting_times = sorted([random.randint(0, total_seconds) for _ in range(len(selected))])
+        # 콘텐츠 생성
+        data = generate_article(item['kw'], item['cat'], recent_posts, user_links)
+        if not data: continue
+        
+        # 이미지 처리
+        mid = None
+        if data.get('image_prompt'):
+            print("🎨 대표 이미지 생성 및 70% 압축 중...", flush=True)
+            img_data = generate_image_process(data['image_prompt'])
+            if img_data:
+                mid = upload_to_wp_media(img_data)
+        
+        # 태그 처리
+        tag_ids = []
+        if data.get('tags'):
+            for tname in [t.strip() for t in data['tags'].split(',')]:
+                try:
+                    r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth)
+                    tid = next((t['id'] for t in r.json() if t['name'] == tname), None) if r.status_code == 200 else None
+                    if not tid:
+                        cr = requests.post(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags", auth=auth, json={"name": tname})
+                        if cr.status_code == 201: tid = cr.json()['id']
+                    if tid: tag_ids.append(tid)
+                except: continue
 
-    last_wait = 0
-    for i, item in enumerate(selected):
-        wait_for_next = posting_times[i] - last_wait
-        if wait_for_next > 0:
-            print(f"\n⏳ 대기: {wait_for_next//60}분...", flush=True)
-            time.sleep(wait_for_next)
+        # 최종 발행
+        payload = {
+            "title": data['title'], 
+            "content": data['content'], 
+            "excerpt": data['excerpt'],
+            "tags": tag_ids, 
+            "featured_media": mid, 
+            "status": "publish"
+        }
         
-        print(f"📝 콘텐츠 분석 및 생성 중: {item['kw']}", flush=True)
-        content_data = generate_content(item['kw'], item['cat'])
-        
-        if content_data and content_data.get('title'):
-            print(f"📌 최종 제목: {content_data['title']}", flush=True)
-            
-            media_id = None
-            if content_data.get('image_prompt'):
-                print(f"🖼️ 대표 이미지 생성 중...", flush=True)
-                img_bytes = generate_featured_image(content_data['image_prompt'])
-                if img_bytes:
-                    print(f"📤 미디어 라이브러리 업로드 중...", flush=True)
-                    media_id = upload_media_to_wp(img_bytes, f"featured_{int(time.time())}.png")
-            
-            if post_to_wp(content_data, featured_media_id=media_id):
-                print(f"✅ 발행 완료: {content_data['title']}", flush=True)
+        try:
+            post_res = requests.post(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=40)
+            if post_res.status_code == 201:
+                print(f"✅ 발행 성공: {data['title']}", flush=True)
             else:
-                print(f"❌ 워드프레스 발행 실패", flush=True)
-        else:
-            print(f"❌ AI 콘텐츠 생성 실패", flush=True)
+                print(f"❌ 발행 실패: {post_res.status_code}", flush=True)
+        except Exception as e:
+            print(f"❗ 포스팅 중 예외 발생: {e}", flush=True)
             
-        last_wait = posting_times[i]
-
-    print("\n🎉 모든 자동 포스팅 작업이 성공적으로 종료되었습니다.", flush=True)
+        # 스케줄 대기
+        if not IS_TEST and idx < len(targets) - 1:
+            wait = random.randint(900, 1800) # 15분 ~ 30분
+            print(f"⏳ 다음 포스팅까지 {wait//60}분 대기합니다...", flush=True)
+            time.sleep(wait)
 
 if __name__ == "__main__":
     main()
