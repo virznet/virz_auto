@@ -186,9 +186,7 @@ def generate_article(keyword, category, internal_posts, user_links):
                 json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                 json_str = re.sub(r'\s*`{3}$', '', json_str)
             
-            # 3. 유효하지 않은 백슬래시(Invalid Escape) 자가 치유 로직
-            # JSON에서 허용되지 않는 백슬래시 패턴을 찾아서 제거하거나 이중 백슬래시로 변경
-            # (따옴표, 백슬래시, 슬래시, n, r, t, u 등의 표준 이스케이프가 아닌 경우 처리)
+            # 3. 유효하지 않은 백슬래시 자가 치유 로직
             json_str = re.sub(r'\\(?!"|\\|/|b|f|n|r|t|u)', r'', json_str)
 
             # 4. JSON 파싱을 방해하는 특수 제어 문자 제거
@@ -198,11 +196,9 @@ def generate_article(keyword, category, internal_posts, user_links):
                 return json.loads(json_str)
             except json.JSONDecodeError as e:
                 print(f"⚠️ JSON 파싱 실패 ({e}). 정규표현식 추출 시도 중...", flush=True)
-                # { } 사이의 내용만 추출하여 최후의 수단으로 재시도
                 match = re.search(r'(\{.*\})', json_str, re.DOTALL)
                 if match:
                     try:
-                        # 추출된 텍스트 내에서 따옴표 중첩 문제를 해결하기 위한 추가 정제 시도 불가하므로 단순 로드
                         return json.loads(match.group(1))
                     except:
                         pass
@@ -219,18 +215,31 @@ def post_article(data, mid):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
+    # 태그 처리 (문자열 또는 리스트 형식 모두 대응 가능하도록 수정)
     tag_ids = []
-    tags_raw = data.get('tags', '')
+    tags_raw = data.get('tags', [])
+    
     if tags_raw:
-        for tname in [t.strip() for t in tags_raw.split(',') if t.strip()]:
+        # 데이터가 리스트인 경우 그대로 사용, 문자열인 경우 쉼표로 분리
+        if isinstance(tags_raw, list):
+            tag_names = [str(t).strip() for t in tags_raw if str(t).strip()]
+        else:
+            tag_names = [t.strip() for t in str(tags_raw).split(',') if t.strip()]
+            
+        for tname in tag_names:
             try:
                 r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth, timeout=10)
-                tid = next((t['id'] for t in r.json() if t['name'] == tname), None) if r.status_code == 200 and isinstance(r.json(), list) else None
+                # 응답이 리스트인지 확인 후 매칭되는 태그 ID 찾기
+                tags_data = r.json()
+                tid = next((t['id'] for t in tags_data if str(t['name']).lower() == tname.lower()), None) if r.status_code == 200 and isinstance(tags_data, list) else None
+                
                 if not tid:
                     cr = requests.post(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags", auth=auth, json={"name": tname}, timeout=10)
                     if cr.status_code == 201: tid = cr.json()['id']
                 if tid: tag_ids.append(tid)
-            except: continue
+            except Exception as te:
+                print(f"태그 처리 중 오류 ({tname}): {te}", flush=True)
+                continue
 
     payload = {
         "title": data.get('title', '제목 없음'), 
