@@ -24,7 +24,7 @@ if sys.stdout.encoding != 'utf-8':
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
-WP_BASE_URL = "[https://virz.net](https://virz.net)" 
+WP_BASE_URL = "https://virz.net" 
 
 # 테스트 모드: True일 경우 1개만 즉시 발행하고 종료
 IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
@@ -35,7 +35,7 @@ IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
 def load_external_links():
     """links.json 파일에서 사용자 정의 외부 링크 목록을 불러옵니다."""
     file_path = "links.json"
-    default_links = [{"title": "virz.net", "url": "[https://virz.net](https://virz.net)"}]
+    default_links = [{"title": "virz.net", "url": "https://virz.net"}]
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -53,7 +53,7 @@ class NaverScraper:
 
     def get_news_ranking(self, section_id):
         try:
-            res = requests.get(f"[https://news.naver.com/main/ranking/popularDay.naver?sectionId=](https://news.naver.com/main/ranking/popularDay.naver?sectionId=){section_id}", headers=self.headers, timeout=15)
+            res = requests.get(f"https://news.naver.com/main/ranking/popularDay.naver?sectionId={section_id}", headers=self.headers, timeout=15)
             res.encoding = res.apparent_encoding if res.apparent_encoding else 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
             titles = []
@@ -68,7 +68,7 @@ class NaverScraper:
 
     def get_blog_hot_topics(self):
         try:
-            res = requests.get("[https://section.blog.naver.com/HotTopicList.naver](https://section.blog.naver.com/HotTopicList.naver)", headers=self.headers, timeout=15)
+            res = requests.get("https://section.blog.naver.com/HotTopicList.naver", headers=self.headers, timeout=15)
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
             return [t.text.strip() for t in soup.select(".list_hottopic .desc")[:10]]
@@ -91,7 +91,7 @@ def get_recent_posts():
 
 def generate_image_process(prompt):
     """Imagen 4.0으로 이미지 생성 후 JPG 70% 압축 처리"""
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=](https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=){GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
     
     # 글자가 없는 깨끗한 썸네일을 위한 영문 프롬프트 보강
     final_prompt = f"Professional photography for: {prompt}. High resolution, 8k, cinematic lighting. Strictly NO TEXT, NO LETTERS, NO WORDS, NO FONTS."
@@ -144,7 +144,7 @@ def upload_to_wp_media(img_data):
 def generate_article(keyword, category, internal_posts, user_links):
     """Gemini 2.5 Flash를 사용하여 SEO 최적화된 콘텐츠를 생성합니다."""
     model_id = "gemini-2.5-flash-preview-09-2025"
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model_id}:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     # 내부 및 사용자 정의 링크 데이터 준비
     internal_ref = "내 블로그 추천글 목록:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in internal_posts]) if internal_posts else ""
