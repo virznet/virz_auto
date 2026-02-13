@@ -93,7 +93,6 @@ def generate_image_process(prompt):
     """Imagen 4.0으로 이미지 생성 후 JPG 70% 압축 처리"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
     
-    # 글자가 없는 깨끗한 썸네일을 위한 영문 프롬프트 보강
     final_prompt = f"Professional photography for: {prompt}. High resolution, 8k, cinematic lighting. Strictly NO TEXT, NO LETTERS, NO WORDS, NO FONTS."
     
     payload = {
@@ -108,7 +107,6 @@ def generate_image_process(prompt):
             b64_data = result['predictions'][0]['bytesBase64Encoded']
             img_data = base64.b64decode(b64_data)
             
-            # Pillow를 사용한 JPG 변환 및 70% 압축
             img = Image.open(io.BytesIO(img_data))
             if img.mode != 'RGB':
                 img = img.convert('RGB')
@@ -146,7 +144,6 @@ def generate_article(keyword, category, internal_posts, user_links):
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
-    # 내부 및 사용자 정의 링크 데이터 준비
     internal_ref = "내 블로그 추천글 목록:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in internal_posts]) if internal_posts else ""
     selected_ext = random.sample(user_links, min(len(user_links), 2))
     user_ext_ref = "본문에 포함할 외부 링크 목록:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
@@ -156,14 +153,13 @@ def generate_article(keyword, category, internal_posts, user_links):
 
 [SEO 링크 배치 가이드]
 1. 내부 링크: 제공된 내 블로그 추천글 중 하나를 본문의 첫 번째 H2 섹션 이후에 자연스럽게 삽입하세요.
-2. 사용자 외부 링크: 제공된 외부 링크 2개를 본문 중간중간(H2~H3 섹션 사이)에 분산 배치하세요. (텍스트 링크와 버튼 블록 혼용)
-3. AI 권위 링크: 주제를 뒷받침할 공신력 있는 외부 출처(뉴스, 백과사전 등)를 AI가 직접 하나 더 찾아 본문 하단에 추가하세요.
+2. 사용자 외부 링크: 제공된 외부 링크 2개를 본문 중간중간에 분산 배치하세요. (텍스트 링크와 버튼 블록 혼용)
+3. AI 권위 링크: 주제를 뒷받침할 공신력 있는 외부 출처를 AI가 직접 하나 더 찾아 본문 하단에 추가하세요.
 
 [필수 규칙]
 - 응답은 반드시 유효한 JSON 형식이어야 합니다.
 - JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 - 본문 내용은 워드프레스 구텐베르크 블록(HTML 주석 형식)을 사용해야 합니다.
-- 중요: 텍스트 내의 모든 이중 따옴표(")는 백슬래시(\")를 사용해 반드시 이스케이프 처리하세요.
 - 인사말, 날짜 언급 없이 바로 본론으로 시작하세요.
 """
     
@@ -182,25 +178,31 @@ def generate_article(keyword, category, internal_posts, user_links):
         if res.status_code == 200:
             raw_response = res.json()['candidates'][0]['content']['parts'][0]['text']
             
-            # JSON 데이터 정제 로직 (안전한 추출 및 제어 문자 제거)
+            # 1. 기본적인 공백 제거
             json_str = raw_response.strip()
             
-            # 마크다운 백틱 제거 (정규표현식을 이용해 중단 방지)
+            # 2. 마크다운 백틱 제거
             if json_str.startswith("`" * 3):
                 json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                 json_str = re.sub(r'\s*`{3}$', '', json_str)
             
-            # JSON 파싱을 방해하는 특수 제어 문자 제거
+            # 3. 유효하지 않은 백슬래시(Invalid Escape) 자가 치유 로직
+            # JSON에서 허용되지 않는 백슬래시 패턴을 찾아서 제거하거나 이중 백슬래시로 변경
+            # (따옴표, 백슬래시, 슬래시, n, r, t, u 등의 표준 이스케이프가 아닌 경우 처리)
+            json_str = re.sub(r'\\(?!"|\\|/|b|f|n|r|t|u)', r'', json_str)
+
+            # 4. JSON 파싱을 방해하는 특수 제어 문자 제거
             json_str = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
             
             try:
                 return json.loads(json_str)
             except json.JSONDecodeError as e:
-                print(f"⚠️ JSON 파싱 1차 실패 ({e}). 재정제 시도 중...", flush=True)
-                # 중괄호 { } 사이의 내용만 추출하여 재시도
+                print(f"⚠️ JSON 파싱 실패 ({e}). 정규표현식 추출 시도 중...", flush=True)
+                # { } 사이의 내용만 추출하여 최후의 수단으로 재시도
                 match = re.search(r'(\{.*\})', json_str, re.DOTALL)
                 if match:
                     try:
+                        # 추출된 텍스트 내에서 따옴표 중첩 문제를 해결하기 위한 추가 정제 시도 불가하므로 단순 로드
                         return json.loads(match.group(1))
                     except:
                         pass
@@ -217,7 +219,6 @@ def post_article(data, mid):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    # 태그 자동 매칭 및 생성
     tag_ids = []
     tags_raw = data.get('tags', '')
     if tags_raw:
@@ -251,14 +252,12 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ GEMINI_API_KEY가 누락되었습니다.", flush=True); return
 
-    # 설정 및 이전 데이터 로드
     user_links = load_external_links()
     recent_posts = get_recent_posts()
     scraper = NaverScraper()
     
     print("🚀 SEO 지능형 엔진 기동: 실시간 트렌드 분석 및 포스팅 시작...", flush=True)
     
-    # 키워드 풀 구성
     jobs = [("101", "경제/비즈니스"), ("105", "IT/테크"), (None, "일반/생활")]
     pool = []
     for sid, cat in jobs:
@@ -269,18 +268,15 @@ def main():
     if not pool:
         print("❌ 수집된 트렌드 데이터가 없습니다.", flush=True); return
     
-    # 발행 대상 선정
     targets = random.sample(pool, 1) if IS_TEST else random.sample(pool, min(len(pool), 10))
     
     for idx, item in enumerate(targets):
         print(f"📝 [{idx+1}/{len(targets)}] '{item['kw']}' 포스팅 생성 중...", flush=True)
         
-        # 1. AI 콘텐츠 생성
         data = generate_article(item['kw'], item['cat'], recent_posts, user_links)
         if not data:
             print("❌ AI 데이터 파싱 실패. 다음 키워드로 넘어갑니다.", flush=True); continue
         
-        # 2. 이미지 생성 및 처리
         mid = None
         if data.get('image_prompt'):
             print("🎨 대표 이미지 생성 및 최적화(70% JPG) 중...", flush=True)
@@ -288,15 +284,13 @@ def main():
             if img_data:
                 mid = upload_to_wp_media(img_data)
         
-        # 3. 워드프레스 발행
         if post_article(data, mid):
             print(f"✅ 발행 성공: {data.get('title')}", flush=True)
         else:
             print("❌ 워드프레스 발행 실패", flush=True)
             
-        # 스케줄 대기 (운영 모드일 경우)
         if not IS_TEST and idx < len(targets) - 1:
-            wait = random.randint(900, 1800) # 15~30분 랜덤 대기
+            wait = random.randint(900, 1800)
             print(f"⏳ 다음 포스팅까지 약 {wait//60}분 대기합니다...", flush=True)
             time.sleep(wait)
 
