@@ -148,21 +148,33 @@ def generate_article(keyword, category, internal_posts, user_links):
 [필수 가이드: 휴먼 라이팅 및 가독성]
 1. 도입부: 인사말('안녕하세요'), 자기소개 등을 절대 하지 마세요. 본론으로 즉시 시작하세요.
 2. 소제목 규칙: 소제목(H2, H3, H4) 작성 시 리스트 순서를 나타내는 숫자(1., 2.), 문자(가., A.), 서수(첫째, 둘째)를 절대 사용하지 마세요.
-3. 모바일 최적화: 한 문단은 최대 3줄 이내로 유지하고, 문단 사이 줄바꿈을 과감하게 활용하세요.
+3. 가독성 최적화: 데스크탑과 모바일 환경을 모두 고려하여, 한 문단은 3~5줄 내외의 충분한 길이를 갖도록 작성하세요. 문단 사이에는 적절한 여백을 두어 시각적인 피로도를 낮추되, 너무 듬성듬성해 보이지 않게 조절하세요.
 4. 금지 문구: 제목이나 본문에 '3000자 분석', 'AI 생성', '프롬프트'와 같은 단어를 절대 노출하지 마세요.
-
-[링크 전략]
-- 내부 링크 2개, 외부 링크 2개를 반드시 본문 중간 또는 섹션 하단에 삽입하세요. 
-- 버튼 블록(Gutenberg Button) 형식을 적극 활용하세요.
-
-JSON 응답 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
+5. JSON 무결성: 모든 텍스트 내의 큰따옴표는 반드시 백슬래시(\\")로 이스케이프하고, 유효한 JSON 형식을 유지하세요.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}"
+    
+    # JSON 파싱 에러를 방지하기 위해 Response Schema 정의
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "content": {"type": "string"},
+            "excerpt": {"type": "string"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "image_prompt": {"type": "string"}
+        },
+        "required": ["title", "content", "excerpt", "tags", "image_prompt"]
+    }
+
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "generationConfig": {"responseMimeType": "application/json"}
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": response_schema
+        }
     }
     
     for i in range(5):
@@ -170,15 +182,24 @@ JSON 응답 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
             res = requests.post(url, json=payload, timeout=180)
             if res.status_code == 200:
                 raw_response = res.json()['candidates'][0]['content']['parts'][0]['text']
+                
+                # 텍스트 정제 (마크다운 코드 블록 제거 및 제어 문자 처리)
                 json_str = raw_response.strip()
                 if json_str.startswith("```"):
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
+                
+                # 비가시적 제어 문자 제거 (JSON 에러의 주원인)
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
+                
+                data = json.loads(json_str)
                 print("✅ AI 콘텐츠 생성 완료!", flush=True)
-                return json.loads(json_str)
+                return data
             else:
                 print(f"⚠️ API 호출 실패 (HTTP {res.status_code}). 재시도 중... ({i+1}/5)", flush=True)
+            time.sleep(2**i)
+        except json.JSONDecodeError as je:
+            print(f"⚠️ JSON 파싱 오류: {je}. AI 응답을 재검토합니다.", flush=True)
             time.sleep(2**i)
         except Exception as e:
             print(f"⚠️ 오류 발생: {e}. 재시도 중... ({i+1}/5)", flush=True)
@@ -247,12 +268,12 @@ def main():
     scraper = TrendScraper()
     
     jobs = [
-        ("https://news.naver.com/section/102", "사회"),
-        ("https://news.naver.com/section/105", "IT/과학"),
-        ("https://news.naver.com/breakingnews/section/103/241", "건강정보"),
-        ("https://news.naver.com/breakingnews/section/103/237", "여행/레저"),
-        ("https://news.naver.com/breakingnews/section/103/376", "패션/뷰티"),
-        ("https://news.naver.com/breakingnews/section/103/242", "공연/전시")
+        ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회"),
+        ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/과학"),
+        ("[https://news.naver.com/breakingnews/section/103/241](https://news.naver.com/breakingnews/section/103/241)", "건강정보"),
+        ("[https://news.naver.com/breakingnews/section/103/237](https://news.naver.com/breakingnews/section/103/237)", "여행/레저"),
+        ("[https://news.naver.com/breakingnews/section/103/376](https://news.naver.com/breakingnews/section/103/376)", "패션/뷰티"),
+        ("[https://news.naver.com/breakingnews/section/103/242](https://news.naver.com/breakingnews/section/103/242)", "공연/전시")
     ]
     
     pool = []
