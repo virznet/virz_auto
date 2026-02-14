@@ -28,7 +28,7 @@ WP_BASE_URL = "https://virz.net"
 
 # TEST_MODE 판단 로직 강화
 # 'true', '1', 't', 'yes', 'y' 등을 모두 True로 인정하도록 개선
-test_mode_raw = str(os.environ.get('TEST_MODE', 'false')).strip().lower()
+test_mode_raw = str(os.environ.get('TEST_MODE', 'true')).strip().lower()
 IS_TEST = test_mode_raw in ['true', '1', 't', 'yes', 'y']
 
 # ==========================================
