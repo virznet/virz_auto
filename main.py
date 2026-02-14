@@ -137,7 +137,7 @@ def generate_article(keyword, category, internal_posts, user_links):
     user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
     system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
-키워드 '{keyword}'에 대해 3,000자 이상의 매우 상세한 블로그 글을 작성하세요.
+키워드 '{keyword}'에 대해 3,000자 이상의 매우 상세한 블로그 글 작성하세요.
 
 [필수 사항: JSON 무결성]
 - 반드시 유효한 JSON 형식이어야 합니다.
@@ -222,7 +222,7 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] 모든 URL을 마크다운 형식이 아닌 순수 문자열로 수정
+    # [수집 설정] URL 마크다운 형식 제거 및 순수 문자열 URL로 수정
     jobs = [
         ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회"),
         ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/과학"),
