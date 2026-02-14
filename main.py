@@ -56,7 +56,6 @@ class TrendScraper:
     def get_naver_news_custom(self, url):
         """네이버 뉴스 랭킹 또는 섹션/속보 페이지에서 제목 수집"""
         try:
-            # URL 문자열 양쪽의 공백 제거
             clean_url = url.strip()
             res = requests.get(clean_url, headers=self.headers, timeout=15)
             res.encoding = res.apparent_encoding if res.apparent_encoding else 'utf-8'
@@ -64,22 +63,18 @@ class TrendScraper:
             
             titles = []
             
-            # 1. 속보/섹션 뉴스 레이아웃 확인 (.sa_text_strong)
             section_items = soup.select(".sa_text_strong")
             if section_items:
                 titles.extend([t.text.strip() for t in section_items])
             
-            # 2. 랭킹 뉴스 레이아웃 확인 (.rankingnews_list)
             ranking_items = soup.select(".rankingnews_list .list_title")
             if ranking_items:
                 titles.extend([t.text.strip() for t in ranking_items])
             
-            # 3. 구형 또는 헤드라인 레이아웃 확인 (.cluster_text_headline)
             if not titles:
                 alt_items = soup.select(".cluster_text_headline")
                 titles.extend([t.text.strip() for t in alt_items])
 
-            # 중복 제거 및 빈 값 제외 후 최대 10개 반환
             unique_titles = list(dict.fromkeys([t for t in titles if t]))
             return unique_titles[:10]
             
@@ -147,16 +142,9 @@ def generate_article(keyword, category, internal_posts, user_links):
 - 모든 본문 내 큰따옴표는 반드시 \\"로 이스케이프하세요.
 
 [휴먼 터치 및 가독성 가이드]
-1. 자연스러운 어조: 사람이 직접 쓴 것처럼 친근하고 유연한 말투를 사용하세요. 딱딱한 'AI 느낌'을 버리고 독자에게 정보를 공유하는 전문 블로거의 페르소나를 유지하세요.
-2. 모바일 최적화: 스마트폰 화면에서 읽기 좋게 문장을 간결하게 끊어 쓰세요(짧은 호흡). 한 문단은 3줄 내외로 유지하고, 문단 사이에는 과감하게 줄바꿈을 넣어 여백을 만드세요.
-3. 소제목 활용: 독자가 훑어만 봐도 내용을 알 수 있도록 매력적인 소제목(H2, H3)을 적극 활용하세요.
-
-[SEO 링크 및 블록 구성]
-1. 내부 링크: 추천글 중 하나를 첫 번째 H2 섹션 이후에 삽입하세요.
-2. 외부 링크 배치:
-   - 제공된 외부 링크 2개를 활용하되, 본문 맥락에 자연스럽게 녹아들 때만 텍스트 링크를 사용하세요.
-   - 문맥상 연결이 어렵다면 억지로 넣지 말고, 섹션이 끝나는 지점에 '관련 정보 더보기' 등의 텍스트와 함께 버튼 블록(Gutenberg Button block)으로 독립적으로 배치하세요.
-3. 메타 설명 금지: 버튼 타이틀이나 링크 텍스트에 'AI 권위 링크' 등 출처 분류용 명칭을 절대 포함하지 마세요. 사용자를 배려한 실질적인 버튼 문구만 사용하세요.
+1. 자연스러운 어조: 사람이 직접 쓴 것처럼 친근한 말투를 사용하세요. 전문 블로거의 페르소나를 유지하세요.
+2. 모바일 최적화: 한 문단은 3줄 내외로 유지하고, 문단 사이에는 과감하게 줄바꿈을 넣으세요.
+3. 태그 생성: 본문 내용과 관련된 키워드 5~8개를 'tags' 리스트에 담아주세요.
 
 JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 """
@@ -183,7 +171,7 @@ JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
     return None
 
 # ==========================================
-# 5. 워드프레스 발행 로직
+# 5. 워드프레스 발행 로직 (태그 처리 보강)
 # ==========================================
 def post_article(data, mid):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
@@ -191,18 +179,43 @@ def post_article(data, mid):
     
     tag_ids = []
     tags_raw = data.get('tags', [])
+    
+    # 태그 데이터가 리스트인지 문자열인지 확인 후 처리
     if tags_raw:
-        tag_names = tags_raw if isinstance(tags_raw, list) else [t.strip() for t in str(tags_raw).split(',') if t.strip()]
+        if isinstance(tags_raw, str):
+            tag_names = [t.strip() for t in tags_raw.split(',') if t.strip()]
+        else:
+            tag_names = [str(t).strip() for t in tags_raw if str(t).strip()]
+            
         for tname in tag_names:
             try:
+                # 1. 기존 태그 검색 (정확한 매칭을 위해 리스트 전체 탐색)
                 r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth, timeout=10)
-                tags_data = r.json()
-                tid = next((t['id'] for t in tags_data if str(t['name']).lower() == tname.lower()), None) if r.status_code == 200 and isinstance(tags_data, list) else None
+                tid = None
+                if r.status_code == 200:
+                    tags_data = r.json()
+                    if isinstance(tags_data, list):
+                        for t_obj in tags_data:
+                            if t_obj['name'].lower() == tname.lower():
+                                tid = t_obj['id']
+                                break
+                
+                # 2. 태그가 없으면 새로 생성
                 if not tid:
                     cr = requests.post(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags", auth=auth, json={"name": tname}, timeout=10)
-                    if cr.status_code == 201: tid = cr.json()['id']
-                if tid: tag_ids.append(tid)
-            except: continue
+                    if cr.status_code == 201:
+                        tid = cr.json()['id']
+                    elif cr.status_code == 400: # 이미 존재하는 경우 다시 한 번 검색 시도
+                        r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth, timeout=10)
+                        if r.status_code == 200:
+                            tags_data = r.json()
+                            tid = next((t['id'] for t in tags_data if t['name'].lower() == tname.lower()), None)
+                
+                if tid:
+                    tag_ids.append(tid)
+            except Exception as e:
+                print(f"⚠️ 태그 처리 중 오류 ({tname}): {e}", flush=True)
+                continue
 
     payload = {
         "title": data.get('title', '제목 없음'), 
@@ -233,7 +246,6 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] URL 마크다운 형식 제거 및 순수 문자열 URL 리스트로 수정 완료
     jobs = [
         ("https://news.naver.com/section/102", "사회"),
         ("https://news.naver.com/section/105", "IT/과학"),
@@ -254,9 +266,8 @@ def main():
         time.sleep(1)
     
     if not pool: 
-        print("❌ 수집된 트렌드 키워드가 없습니다. URL 또는 선택자를 확인하세요.", flush=True); return
+        print("❌ 수집된 트렌드 키워드가 없습니다.", flush=True); return
     
-    # 무작위로 추출하여 포스팅
     num_posts = 1 if IS_TEST else min(len(pool), 5)
     targets = random.sample(pool, num_posts)
     
