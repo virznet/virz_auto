@@ -10,7 +10,7 @@ import sys
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 from PIL import Image
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # 콘솔 출력 시 한글 깨짐 방지 설정
 if sys.stdout.encoding != 'utf-8':
@@ -156,6 +156,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 
 [이미지 프롬프트 가이드]
 - 인물이 포함될 경우 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요.
+- 만약 내용이 다른 국가나 특정 인종에 관한 것이라면, 해당 국가나 인종의 느낌이 나도록 구체적으로 묘사하세요.
 
 [필수 사항: 워드프레스 구텐베르크 블록 형식 지침]
 - 모든 본문 요소는 반드시 유효한 구텐베르크 블록 주석으로 감싸야 합니다.
@@ -288,7 +289,9 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ GEMINI_API_KEY 누락", flush=True); return
 
-    now = datetime(2026, 2, 14, 11, 4)
+    # 대한민국 표준시(KST, UTC+9) 적용
+    kst = timezone(timedelta(hours=9))
+    now = datetime.now(kst)
     current_date_str = now.strftime("%Y년 %m월 %d일 %H시 %M분")
 
     if not IS_TEST:
