@@ -56,7 +56,7 @@ class TrendScraper:
     def get_naver_news_custom(self, url):
         try:
             clean_url = url.strip()
-            # 마크다운 링크 형식 제거용 정규식
+            # 마크다운 링크 형식 제거용 정규식 (방어적 코드)
             if clean_url.startswith('['):
                 match = re.search(r'\((.*?)\)', clean_url)
                 if match:
@@ -135,7 +135,7 @@ def upload_to_wp_media(img_data):
 # 4. 스마트 콘텐츠 생성
 # ==========================================
 def generate_article(keyword, category_hint, internal_posts, user_links, current_date):
-    print(f"🤖 Gemini API를 통한 콘텐츠 생성 시작...", flush=True)
+    print(f"🤖 Gemini API를 통한 고도화된 콘텐츠 생성 시작...", flush=True)
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
@@ -145,29 +145,40 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
     selected_ext = random.sample(user_links, min(len(user_links), 2))
     user_ext_ref = "외부 링크 (필수 2개 이상 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
-    system_prompt = f"""당신은 전문 SEO 블로거입니다. 
-키워드 '{keyword}'에 대해 매우 상세하고 사람이 직접 작성한 것 같은 품질의 블로그 글을 작성하세요.
+    system_prompt = f"""당신은 전문 SEO 마케터이자 블로거입니다. 
+키워드 '{keyword}'에 대해 매우 깊이 있고 분석적인 블로그 글을 작성하세요. 
 
 [현재 시점 정보]
-- 오늘 날짜는 {current_date}입니다. 이 날짜를 기준으로 시의성 있는 정보를 제공하세요.
+- 오늘 날짜는 {current_date}입니다. 최신 트렌드를 반영하여 작성하세요.
 
-[카테고리 선택 가이드]
-- 아래 제공된 카테고리 리스트 중 본문의 내용과 가장 잘 어울리는 하나를 반드시 선택하여 'category' 필드에 담으세요.
-- 리스트: 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시
-- 기본값은 '트렌드'입니다.
+[카테고리 선택]
+- 리스트: 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시 중 최적의 하나를 선택하세요.
 
 [이미지 프롬프트 가이드]
-- 'image_prompt' 작성 시, 인물이 포함될 경우 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요. 
-- 문맥에 따라 인종을 변경할 수 있습니다.
+- 인물이 포함될 경우 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요.
 
 [필수 사항: 워드프레스 구텐베르크 블록 형식]
-- 모든 콘텐츠는 구텐베르크 블록 주석(<!-- wp:... -->)으로 감싸야 합니다.
+- 모든 본문 요소는 반드시 구텐베르크 블록 주석으로 감싸야 합니다.
+- 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
+- 제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
+- 제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
+- 제목(H4): <!-- wp:heading {{"level":4}} --><h4>제목</h4><!-- /wp:heading -->
+- 버튼(외부 링크용): 
+  <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
+  <div class="wp-block-buttons">
+    <!-- wp:button {{"className":"is-style-fill"}} -->
+    <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">텍스트</a></div>
+    <!-- /wp:button -->
+  </div>
+  <!-- /wp:buttons -->
 
-[필수 가이드: 휴먼 라이팅 및 가독성]
-1. 도입부: 인사말 금지. 본론으로 즉시 시작.
-2. 소제목 규칙: 숫자나 기호(1., 가., 첫째)를 절대 사용하지 마세요.
-3. 가독성 최적화: 한 문단은 3~5줄 내외의 충분한 길이를 갖도록 작성하세요. 너무 짧거나 듬성듬성해 보이지 않게 하세요.
-4. JSON 무결성: 답변이 끊기지 않도록 끝까지 완성하여 유효한 JSON을 출력하세요.
+[글쓰기 고도화 지침]
+1. 계층적 구조: H2로 대주제를 나누고, H3/H4를 사용하여 세부 정보를 상세히 분석하세요.
+2. 서술 방식: 독자에게 정보를 단순히 전달하는 것을 넘어, 인사이트를 제공하는 전문적인 어조를 유지하세요.
+3. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 오직 텍스트로만 구성하세요.
+4. 버튼 활용: 본문 중간이나 섹션 끝에 외부 링크를 '추천 정보' 또는 '관련 사이트'라는 명칭과 함께 버튼 블록으로 삽입하세요.
+5. 가독성: 한 문단은 3~5줄 내외로 구성하여 데스크탑과 모바일 모두에서 풍성하면서도 읽기 편하게 만드세요.
+6. 답변 무결성: JSON 형식을 엄수하고 중간에 끊기지 않도록 하세요.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n수집분류힌트: {category_hint}"
@@ -206,7 +217,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
                 data = json.loads(json_str)
-                print(f"✅ AI 콘텐츠 생성 완료! (선택 카테고리: {data.get('category')})", flush=True)
+                print(f"✅ AI 콘텐츠 생성 완료! (카테고리: {data.get('category')})", flush=True)
                 return data
             else:
                 print(f"⚠️ API 호출 실패 (HTTP {res.status_code}). 재시도 중... ({i+1}/5)", flush=True)
@@ -220,18 +231,14 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 # 5. 워드프레스 발행 로직
 # ==========================================
 def get_or_create_term(taxonomy, name, auth):
-    """워드프레스의 카테고리나 태그 ID를 조회하거나 생성"""
     endpoint = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/{taxonomy}"
     try:
-        # 검색
         r = requests.get(f"{endpoint}?search={name}", auth=auth, timeout=10)
         if r.status_code == 200:
             terms = r.json()
             for t in terms:
                 if t['name'].lower() == name.lower():
                     return t['id']
-        
-        # 생성
         cr = requests.post(endpoint, auth=auth, json={"name": name}, timeout=10)
         if cr.status_code == 201:
             return cr.json()['id']
@@ -244,11 +251,9 @@ def post_article(data, mid):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    # 카테고리 처리
     cat_name = data.get('category', '트렌드')
     cat_id = get_or_create_term('categories', cat_name, auth)
     
-    # 태그 처리
     tag_ids = []
     tags_raw = data.get('tags', [])
     for tname in tags_raw:
@@ -295,7 +300,6 @@ def main():
     recent_posts = get_recent_posts()
     scraper = TrendScraper()
     
-    # 수집 대상 섹션
     jobs = [
         ("https://news.naver.com/section/102", "사회"),
         ("https://news.naver.com/section/105", "IT/과학"),
@@ -312,8 +316,7 @@ def main():
         for i in items: pool.append({"kw": i, "cat_hint": cat_hint})
     
     if not pool: 
-        print("❌ 수집된 데이터가 없습니다.", flush=True)
-        return
+        print("❌ 수집된 데이터가 없습니다.", flush=True); return
     
     targets = random.sample(pool, 1)
     
@@ -322,14 +325,12 @@ def main():
         data = generate_article(item['kw'], item['cat_hint'], recent_posts, user_links, current_date_str)
         
         if not data:
-            print("❌ AI 콘텐츠 생성 실패로 종료합니다.", flush=True)
-            continue
+            print("❌ AI 콘텐츠 생성 실패로 종료합니다.", flush=True); continue
         
         mid = None
         if data.get('image_prompt'):
             img_data = generate_image_process(data['image_prompt'])
-            if img_data: 
-                mid = upload_to_wp_media(img_data)
+            if img_data: mid = upload_to_wp_media(img_data)
         
         if post_article(data, mid):
             print(f"🏁 [{item['kw']}] 작업 완료!", flush=True)
