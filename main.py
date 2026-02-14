@@ -84,6 +84,7 @@ def get_recent_posts():
     return []
 
 def generate_image_process(prompt):
+    print(f"🎨 이미지 생성 API 호출 중... (Prompt: {prompt[:30]}...)", flush=True)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
     final_prompt = f"Professional photography for: {prompt}. High resolution, 8k, cinematic lighting. Strictly NO TEXT, NO LETTERS, NO WORDS."
     payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
@@ -97,24 +98,34 @@ def generate_image_process(prompt):
             if img.mode != 'RGB': img = img.convert('RGB')
             out = io.BytesIO()
             img.save(out, format='JPEG', quality=70, optimize=True)
+            print("✨ 이미지 생성 완료!", flush=True)
             return out.getvalue()
-    except Exception: pass
+        else:
+            print(f"❌ 이미지 생성 실패 (HTTP {response.status_code})", flush=True)
+    except Exception as e:
+        print(f"❌ 이미지 생성 중 오류: {e}", flush=True)
     return None
 
 def upload_to_wp_media(img_data):
+    print("📤 워드프레스 미디어 업로드 중...", flush=True)
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     headers = {"Content-Disposition": f"attachment; filename=feat_{int(time.time())}.jpg", "Content-Type": "image/jpeg"}
     try:
         res = requests.post(url, auth=auth, headers=headers, data=img_data, timeout=60)
-        if res.status_code == 201: return res.json()['id']
-    except Exception: pass
+        if res.status_code == 201:
+            media_id = res.json()['id']
+            print(f"✅ 미디어 업로드 성공 (ID: {media_id})", flush=True)
+            return media_id
+    except Exception as e:
+        print(f"❌ 미디어 업로드 중 오류: {e}", flush=True)
     return None
 
 # ==========================================
 # 4. 스마트 콘텐츠 생성
 # ==========================================
 def generate_article(keyword, category, internal_posts, user_links):
+    print(f"🤖 Gemini API를 통한 콘텐츠 생성 시작... (약 1-2분 소요)", flush=True)
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
@@ -135,15 +146,14 @@ def generate_article(keyword, category, internal_posts, user_links):
 - 버튼: <!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="URL">텍스트</a></div><!-- /wp:button --></div><!-- /wp:buttons -->
 
 [필수 가이드: 휴먼 라이팅 및 가독성]
-1. 도입부: 인사말('안녕하세요'), 자기소개('분석해보겠습니다') 등을 절대 하지 마세요. 본론의 핵심으로 즉시 시작하세요.
+1. 도입부: 인사말('안녕하세요'), 자기소개 등을 절대 하지 마세요. 본론으로 즉시 시작하세요.
 2. 소제목 규칙: 소제목(H2, H3, H4) 작성 시 리스트 순서를 나타내는 숫자(1., 2.), 문자(가., A.), 서수(첫째, 둘째)를 절대 사용하지 마세요.
 3. 모바일 최적화: 한 문단은 최대 3줄 이내로 유지하고, 문단 사이 줄바꿈을 과감하게 활용하세요.
-4. 금지 문구: 제목이나 본문에 '3000자 분석', 'AI 생성', '프롬프트'와 같은 단어를 절대로 노출하지 마세요.
+4. 금지 문구: 제목이나 본문에 '3000자 분석', 'AI 생성', '프롬프트'와 같은 단어를 절대 노출하지 마세요.
 
 [링크 전략]
 - 내부 링크 2개, 외부 링크 2개를 반드시 본문 중간 또는 섹션 하단에 삽입하세요. 
-- 문맥상 흐름이 맞다면 텍스트 링크를 사용하고, 그렇지 않다면 버튼 블록(Gutenberg Button) 형식으로 배치하세요.
-- 버튼 타이틀에 출처 분류용 설명(예: AI 권위 링크) 등은 모두 삭제하세요.
+- 버튼 블록(Gutenberg Button) 형식을 적극 활용하세요.
 
 JSON 응답 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 """
@@ -155,7 +165,6 @@ JSON 응답 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
         "generationConfig": {"responseMimeType": "application/json"}
     }
     
-    # API 호출 로직 (재시도 포함)
     for i in range(5):
         try:
             res = requests.post(url, json=payload, timeout=180)
@@ -166,16 +175,21 @@ JSON 응답 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
+                print("✅ AI 콘텐츠 생성 완료!", flush=True)
                 return json.loads(json_str)
+            else:
+                print(f"⚠️ API 호출 실패 (HTTP {res.status_code}). 재시도 중... ({i+1}/5)", flush=True)
             time.sleep(2**i)
-        except Exception:
-            continue
+        except Exception as e:
+            print(f"⚠️ 오류 발생: {e}. 재시도 중... ({i+1}/5)", flush=True)
+            time.sleep(2**i)
     return None
 
 # ==========================================
 # 5. 워드프레스 발행 로직
 # ==========================================
 def post_article(data, mid):
+    print("📢 워드프레스 포스팅 발행 중...", flush=True)
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
@@ -207,10 +221,14 @@ def post_article(data, mid):
     
     try:
         res = requests.post(url, auth=auth, json=payload, timeout=40)
-        return res.status_code == 201
+        if res.status_code == 201:
+            print(f"🚀 포스팅 발행 성공! (Link: {res.json().get('link')})", flush=True)
+            return True
+        else:
+            print(f"❌ 발행 실패 (HTTP {res.status_code}): {res.text}", flush=True)
     except Exception as e:
-        print(f"워드프레스 API 발행 오류: {e}", flush=True)
-        return False
+        print(f"❌ 워드프레스 API 발행 오류: {e}", flush=True)
+    return False
 
 # ==========================================
 # 6. 메인 실행부
@@ -228,7 +246,6 @@ def main():
     recent_posts = get_recent_posts()
     scraper = TrendScraper()
     
-    # 수집 대상 섹션 정의 및 카테고리 매핑
     jobs = [
         ("https://news.naver.com/section/102", "사회"),
         ("https://news.naver.com/section/105", "IT/과학"),
@@ -251,19 +268,23 @@ def main():
     targets = random.sample(pool, 1)
     
     for item in targets:
-        print(f"📝 '{item['kw']}' 생성 중...", flush=True)
+        print(f"📝 대상 키워드: '{item['kw']}'", flush=True)
         data = generate_article(item['kw'], item['cat'], recent_posts, user_links)
-        if not data: continue
+        
+        if not data:
+            print("❌ AI 콘텐츠 생성에 실패하여 이번 턴을 종료합니다.", flush=True)
+            continue
         
         mid = None
         if data.get('image_prompt'):
             img_data = generate_image_process(data['image_prompt'])
-            if img_data: mid = upload_to_wp_media(img_data)
+            if img_data: 
+                mid = upload_to_wp_media(img_data)
         
         if post_article(data, mid):
-            print(f"✅ 발행 성공: {data.get('title')}", flush=True)
+            print(f"🏁 [{item['kw']}] 작업 완료!", flush=True)
         else:
-            print("❌ 발행 실패", flush=True)
+            print("❌ 최종 발행 단계에서 오류가 발생했습니다.", flush=True)
 
 if __name__ == "__main__":
     main()
