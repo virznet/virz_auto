@@ -223,7 +223,7 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] 사용자 요청 경로 기반 리스트업
+    # [수집 설정] 순수 URL 문자열로 수정됨
     jobs = [
         ("[https://news.naver.com/main/ranking/popularDay.naver?sectionId=102](https://news.naver.com/main/ranking/popularDay.naver?sectionId=102)", "사회"),
         ("[https://news.naver.com/main/ranking/popularDay.naver?sectionId=105](https://news.naver.com/main/ranking/popularDay.naver?sectionId=105)", "IT/과학"),
@@ -237,12 +237,12 @@ def main():
     for url, cat in jobs:
         print(f"📡 {cat} 뉴스 수집 중...", flush=True)
         items = scraper.get_naver_news_custom(url)
-        for i in items[:3]: # 각 섹션당 상위 3개씩 후보 등록
+        for i in items: # 수집된 모든 키워드를 풀에 등록 (필터링은 나중에 함)
             pool.append({"kw": i, "cat": cat})
         time.sleep(1)
     
     if not pool: 
-        print("❌ 수집된 트렌드 키워드가 없습니다.", flush=True); return
+        print("❌ 수집된 트렌드 키워드가 없습니다. URL 또는 선택자를 확인하세요.", flush=True); return
     
     # 무작위로 추출하여 포스팅 (테스트 모드면 1개, 평상시는 최대 5개)
     num_posts = 1 if IS_TEST else min(len(pool), 5)
