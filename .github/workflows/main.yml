@@ -31,5 +31,5 @@ jobs:
           WP_USERNAME: ${{ secrets.WP_USERNAME }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           # TEST_MODE가 'false'여야 랜덤 대기 로직이 작동하여 '랜덤 분'에 포스팅됩니다.
-          TEST_MODE: 'false'
+          TEST_MODE: '${{ secrets.TEST_MODE }}'
         run: python -u main.py
