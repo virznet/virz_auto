@@ -56,7 +56,6 @@ class TrendScraper:
     def get_naver_news_custom(self, url):
         try:
             clean_url = url.strip()
-            # 마크다운 링크 형식 제거용 정규식
             if clean_url.startswith('['):
                 match = re.search(r'\((.*?)\)', clean_url)
                 if match:
@@ -93,16 +92,12 @@ def get_recent_posts():
 def generate_image_process(prompt):
     print(f"🎨 이미지 생성 API 호출 중... (Prompt: {prompt[:30]}...)", flush=True)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
-    
-    # 인종 및 퀄리티 보정 프롬프트 추가
     final_prompt = f"Professional commercial photography for: {prompt}. High resolution, 8k, cinematic lighting, sharp focus. Strictly NO TEXT, NO LETTERS, NO WORDS."
-    
     payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
     try:
         response = requests.post(url, json=payload, timeout=150)
         if response.status_code == 200:
             result = response.json()
-            # [수정] predictions 키 존재 여부 확인 로직 추가
             if 'predictions' in result and len(result['predictions']) > 0:
                 b64_data = result['predictions'][0]['bytesBase64Encoded']
                 img_data = base64.b64decode(b64_data)
@@ -112,12 +107,9 @@ def generate_image_process(prompt):
                 img.save(out, format='JPEG', quality=85, optimize=True)
                 print("✨ 이미지 생성 완료!", flush=True)
                 return out.getvalue()
-            else:
-                print(f"⚠️ 이미지 생성 실패: 응답에 'predictions' 데이터가 없습니다. (Response: {result})", flush=True)
-        else:
-            print(f"❌ 이미지 생성 실패 (HTTP {response.status_code}: {response.text})", flush=True)
+        print(f"❌ 이미지 생성 실패", flush=True)
     except Exception as e:
-        print(f"❌ 이미지 생성 중 오류 발생: {e}", flush=True)
+        print(f"❌ 이미지 생성 오류: {e}", flush=True)
     return None
 
 def upload_to_wp_media(img_data):
@@ -131,10 +123,8 @@ def upload_to_wp_media(img_data):
             media_id = res.json()['id']
             print(f"✅ 미디어 업로드 성공 (ID: {media_id})", flush=True)
             return media_id
-        else:
-            print(f"❌ 미디어 업로드 실패 (HTTP {res.status_code})", flush=True)
     except Exception as e:
-        print(f"❌ 미디어 업로드 중 오류: {e}", flush=True)
+        print(f"❌ 미디어 업로드 오류: {e}", flush=True)
     return None
 
 # ==========================================
@@ -151,6 +141,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
     selected_ext = random.sample(user_links, min(len(user_links), 2))
     user_ext_ref = "외부 링크 (필수 2개 이상 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
+    # [수정] 구텐베르크 블록 주석 형식을 더욱 강력하게 규정하고 f-string 충돌 방지
     system_prompt = f"""당신은 전문 SEO 마케터이자 블로거입니다. 
 키워드 '{keyword}'에 대해 매우 깊이 있고 분석적인 블로그 글을 작성하세요. 
 
@@ -158,36 +149,35 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 - 오늘 날짜는 {current_date}입니다. 최신 트렌드를 반영하여 작성하세요.
 
 [카테고리 선택]
-- 리스트: 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시 중 최적의 하나를 선택하세요.
+- 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시 중 하나를 선택하세요.
 
 [이미지 프롬프트 가이드]
-- 인물이 포함될 경우 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요.
-- 만약 내용이 다른 국가나 특정 인종에 관한 것이라면, 해당 국가나 인종의 느낌이 나도록 구체적으로 묘사하세요.
+- 인물은 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요.
 
-[필수 사항: 워드프레스 구텐베르크 블록 형식 지침]
-- 모든 본문 요소는 반드시 유효한 구텐베르크 블록 주석(Gutenberg Comment)으로 감싸야 합니다.
-- **주석 내의 JSON 속성은 반드시 표준 형식을 지켜야 하며 깨지지 않도록 주의하세요.**
+[필수 사항: 워드프레스 구텐베르크(Gutenberg) 블록 표준 준수]
+- 모든 본문 요소는 반드시 유효한 구텐베르크 블록 주석으로 감싸야 합니다. 
+- 주석은 절대로 잘리거나 깨져서는 안 되며, 여는 주석과 닫는 주석을 엄격하게 짝지으세요.
+- **주석 내 JSON 속성(예: {{"level":3}})의 따옴표와 중괄호를 완벽하게 포함하세요.**
+
 - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
-- 제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
-- 제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
-- 제목(H4): <!-- wp:heading {{"level":4}} --><h4>제목</h4><!-- /wp:heading -->
-- 버튼 블록(외부 링크용): 
-  <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
-  <div class="wp-block-buttons">
-    <!-- wp:button {{"className":"is-style-fill"}} -->
-    <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">텍스트</a></div>
-    <!-- /wp:button -->
-  </div>
-  <!-- /wp:buttons -->
+- 대제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
+- 중제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
+- 소제목(H4): <!-- wp:heading {{"level":4}} --><h4>제목</h4><!-- /wp:heading -->
+- 버튼 블록: 
+<!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
+<div class="wp-block-buttons">
+  <!-- wp:button {{"className":"is-style-fill"}} -->
+  <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">버튼 텍스트</a></div>
+  <!-- /wp:button -->
+</div>
+<!-- /wp:buttons -->
 
 [글쓰기 고도화 지침]
 1. 계층적 구조: H2로 대주제를 나누고, H3/H4를 사용하여 세부 정보를 상세히 분석하세요. 
-2. 주석 무결성: 구텐베르크 주석 내의 중괄호 및 따옴표(예: {{"level":3}})가 JSON 데이터 구조와 충돌하지 않도록 문자열 내에서 완벽하게 표현하세요. 태그가 열린 채로 끝나지 않도록 반드시 닫는 태그(예: <!-- /wp:heading -->)를 확인하세요.
-3. 서술 방식: 독자에게 정보를 단순히 전달하는 것을 넘어, 인사이트를 제공하는 전문적인 어조를 유지하세요.
-4. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 오직 텍스트로만 구성하세요.
-5. 버튼 활용: 본문 중간이나 섹션 끝에 외부 링크를 버튼 블록으로 삽입하세요. 버튼 텍스트에는 '관련 사이트:'와 같은 불필요한 머리말을 제거하고 자연스럽고 클릭을 유도하는 텍스트만 사용하세요.
-6. 가독성: 한 문단은 3~5줄 내외로 구성하여 데스크탑과 모바일 모두에서 풍성하면서도 읽기 편하게 만드세요.
-7. 답변 무결성: JSON 형식을 엄수하고 중간에 끊기지 않도록 하세요.
+2. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 
+3. 버튼 활용: 외부 링크는 본문 중간이나 하단에 반드시 '버튼 블록' 형식으로 삽입하세요. 버튼 텍스트는 불필요한 수식어를 제거하고 짧고 강력한 액션 문구를 사용하세요.
+4. 가독성: 한 문단은 3~5줄 내외로 구성하세요.
+5. 무결성: JSON 응답이 중간에 끊기지 않도록 끝까지 완성하세요. HTML 엔티티(&lt; 등)를 사용하지 말고 원시 문자(<, >)를 사용하세요.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n수집분류힌트: {category_hint}"
@@ -224,12 +214,14 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
                 if json_str.startswith("```"):
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
+                
+                # 제어 문자 정제
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
                 data = json.loads(json_str)
                 print(f"✅ AI 콘텐츠 생성 완료! (카테고리: {data.get('category')})", flush=True)
                 return data
             else:
-                print(f"⚠️ API 호출 실패 (HTTP {res.status_code}). 재시도 중... ({i+1}/5)", flush=True)
+                print(f"⚠️ API 호출 실패 (HTTP {res.status_code})", flush=True)
             time.sleep(2**i)
         except Exception as e:
             print(f"⚠️ 오류 발생: {e}. 재시도 중... ({i+1}/5)", flush=True)
@@ -297,7 +289,6 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ GEMINI_API_KEY 누락", flush=True); return
 
-    # 대한민국 표준시(KST, UTC+9) 적용
     kst = timezone(timedelta(hours=9))
     now = datetime.now(kst)
     current_date_str = now.strftime("%Y년 %m월 %d일 %H시 %M분")
