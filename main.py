@@ -136,20 +136,29 @@ def generate_article(keyword, category, internal_posts, user_links):
     
     internal_ref = "내 블로그 추천글:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in internal_posts]) if internal_posts else ""
     selected_ext = random.sample(user_links, min(len(user_links), 2))
-    user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
+    user_ext_ref = "제공된 외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
     system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
-키워드 '{keyword}'에 대해 3,000자 이상의 매우 상세한 블로그 글 작성하세요.
+키워드 '{keyword}'에 대해 3,000자 이상의 매우 상세하고 가치 있는 블로그 글을 작성하세요.
 
 [필수 사항: JSON 무결성]
 - 반드시 유효한 JSON 형식이어야 합니다.
 - 'content' 필드 내의 HTML 태그 속성에는 큰따옴표(") 대신 작은따옴표(')를 사용하세요. 
 - 모든 본문 내 큰따옴표는 반드시 \\"로 이스케이프하세요.
 
-[SEO 구성]
-1. 내부 링크: 추천글 중 하나를 첫 H2 섹션 이후에 삽입.
-2. 외부 링크: 제공된 외부 링크 2개를 본문 중간에 자연스럽게 배치.
-3. 이미지: image_prompt는 본문을 상징하는 멋진 사진을 위한 상세한 영어 프롬프트로 작성.
+[휴먼 터치 및 가독성 가이드]
+1. 자연스러운 어조: 사람이 직접 쓴 것처럼 친근하고 유연한 말투를 사용하세요. 딱딱한 'AI 느낌'을 버리고 독자에게 정보를 공유하는 전문 블로거의 페르소나를 유지하세요.
+2. 모바일 최적화: 스마트폰 화면에서 읽기 좋게 문장을 간결하게 끊어 쓰세요(짧은 호흡). 한 문단은 3줄 내외로 유지하고, 문단 사이에는 과감하게 줄바꿈을 넣어 여백을 만드세요.
+3. 소제목 활용: 독자가 훑어만 봐도 내용을 알 수 있도록 매력적인 소제목(H2, H3)을 적극 활용하세요.
+
+[SEO 링크 및 블록 구성]
+1. 내부 링크: 추천글 중 하나를 첫 번째 H2 섹션 이후에 삽입하세요.
+2. 외부 링크 배치:
+   - 제공된 외부 링크 2개를 활용하되, 본문 맥락에 자연스럽게 녹아들 때만 텍스트 링크를 사용하세요.
+   - 문맥상 연결이 어렵다면 억지로 넣지 말고, 섹션이 끝나는 지점에 '관련 정보 더보기' 등의 텍스트와 함께 버튼 블록(Gutenberg Button block)으로 독립적으로 배치하세요.
+3. 메타 설명 금지: 버튼 타이틀이나 링크 텍스트에 'AI 권위 링크' 등 출처 분류용 명칭을 절대 포함하지 마세요. 사용자를 배려한 실질적인 버튼 문구만 사용하세요.
+
+JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}\n위 정보를 바탕으로 완성도 높은 JSON 데이터를 생성하세요."
@@ -212,7 +221,7 @@ def post_article(data, mid):
         return False
 
 # ==========================================
-# 6. 메인 실행부 (순수 문자열 URL 리스트)
+# 6. 메인 실행부
 # ==========================================
 def main():
     if not GEMINI_API_KEY: 
@@ -224,7 +233,7 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] URL을 마크다운 문법 없이 순수하게 문자열로만 구성하였습니다.
+    # [수집 설정] URL 마크다운 형식 제거 및 순수 문자열 URL 리스트로 수정 완료
     jobs = [
         ("https://news.naver.com/section/102", "사회"),
         ("https://news.naver.com/section/105", "IT/과학"),
