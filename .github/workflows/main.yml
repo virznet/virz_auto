@@ -11,7 +11,10 @@ workflow_dispatch: # 수동 실행 버튼 활성화
 jobs:
 run-auto-post:
 runs-on: ubuntu-latest
+
+
 timeout-minutes: 180 # 랜덤 대기 시간(최대 55분)을 고려하여 넉넉하게 설정
+
 steps:
   - name: Checkout code
     uses: actions/checkout@v4
