@@ -26,10 +26,10 @@ WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
 WP_BASE_URL = "https://virz.net" 
 
-# TEST_MODE 판단 로직 강화 (공백 제거 및 소문자 변환)
-# 환경 변수에서 가져온 값이 'true'인 경우 즉시 실행
-test_mode_env = str(os.environ.get('TEST_MODE', 'false')).strip().lower()
-IS_TEST = test_mode_env == 'true'
+# TEST_MODE 판단 로직 강화
+# 'true', '1', 't', 'yes', 'y' 등을 모두 True로 인정하도록 개선
+test_mode_raw = str(os.environ.get('TEST_MODE', 'false')).strip().lower()
+IS_TEST = test_mode_raw in ['true', '1', 't', 'yes', 'y']
 
 # ==========================================
 # 2. 데이터 수집 로직
@@ -168,7 +168,9 @@ def main():
         print("❌ API 키 누락")
         return
 
-    # [수정된 지연 로직]
+    # 현재 감지된 TEST_MODE 상태 출력 (디버깅용)
+    print(f"DEBUG: 현재 TEST_MODE 환경 변수 값 = '{os.environ.get('TEST_MODE', 'NOT_SET')}'")
+    
     if IS_TEST:
         print("🧪 테스트 모드 활성화: 대기 시간 없이 즉시 실행합니다.")
     else:
@@ -196,13 +198,17 @@ def main():
         titles = scraper.get_naver_news_titles(url)
         for t in titles: pool.append(t)
     
-    if not pool: return
+    if not pool: 
+        print("⚠️ 수집된 데이터가 없습니다.")
+        return
     
     keyword = random.choice(pool)
     print(f"📝 대상 키워드: {keyword}")
     
     data = generate_article(keyword, "트렌드 뉴스", recent_posts, user_links)
-    if not data: return
+    if not data: 
+        print("⚠️ 콘텐츠 생성 실패")
+        return
     
     mid = None
     if data.get('image_prompt'):
@@ -211,6 +217,8 @@ def main():
     
     if post_article(data, mid):
         print(f"✅ 발행 성공: {data.get('title')}")
+    else:
+        print("❌ 발행 실패")
 
 if __name__ == "__main__":
     main()
