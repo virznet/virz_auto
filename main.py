@@ -56,7 +56,9 @@ class TrendScraper:
     def get_naver_news_custom(self, url):
         """네이버 뉴스 랭킹 또는 섹션/속보 페이지에서 제목 수집"""
         try:
-            res = requests.get(url, headers=self.headers, timeout=15)
+            # URL 문자열 양쪽의 공백 제거
+            clean_url = url.strip()
+            res = requests.get(clean_url, headers=self.headers, timeout=15)
             res.encoding = res.apparent_encoding if res.apparent_encoding else 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
             
@@ -86,7 +88,7 @@ class TrendScraper:
             return []
 
 # ==========================================
-# 3. 워드프레스 & 이미지 처리 (동일 유지)
+# 3. 워드프레스 & 이미지 처리
 # ==========================================
 def get_recent_posts():
     try:
@@ -126,7 +128,7 @@ def upload_to_wp_media(img_data):
     return None
 
 # ==========================================
-# 4. 스마트 콘텐츠 생성 (JSON 무결성 강화)
+# 4. 스마트 콘텐츠 생성
 # ==========================================
 def generate_article(keyword, category, internal_posts, user_links):
     model_id = "gemini-2.5-flash-preview-09-2025"
@@ -172,7 +174,7 @@ def generate_article(keyword, category, internal_posts, user_links):
     return None
 
 # ==========================================
-# 5. 워드프레스 발행 로직 (동일 유지)
+# 5. 워드프레스 발행 로직
 # ==========================================
 def post_article(data, mid):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
@@ -210,7 +212,7 @@ def post_article(data, mid):
         return False
 
 # ==========================================
-# 6. 메인 실행부 (지정된 경로 데이터 풀링)
+# 6. 메인 실행부 (순수 문자열 URL 리스트)
 # ==========================================
 def main():
     if not GEMINI_API_KEY: 
@@ -222,14 +224,14 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] 모든 URL에서 마크다운 링크 형식을 제거하고 순수한 URL 문자열로 수정함
+    # [수집 설정] URL을 마크다운 문법 없이 순수하게 문자열로만 구성하였습니다.
     jobs = [
-        ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회"),
-        ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/과학"),
-        ("[https://news.naver.com/breakingnews/section/103/241](https://news.naver.com/breakingnews/section/103/241)", "건강정보"),
-        ("[https://news.naver.com/breakingnews/section/103/237](https://news.naver.com/breakingnews/section/103/237)", "여행/레저"),
-        ("[https://news.naver.com/breakingnews/section/103/376](https://news.naver.com/breakingnews/section/103/376)", "패션/뷰티"),
-        ("[https://news.naver.com/breakingnews/section/103/242](https://news.naver.com/breakingnews/section/103/242)", "공연/전시")
+        ("https://news.naver.com/section/102", "사회"),
+        ("https://news.naver.com/section/105", "IT/과학"),
+        ("https://news.naver.com/breakingnews/section/103/241", "건강정보"),
+        ("https://news.naver.com/breakingnews/section/103/237", "여행/레저"),
+        ("https://news.naver.com/breakingnews/section/103/376", "패션/뷰티"),
+        ("https://news.naver.com/breakingnews/section/103/242", "공연/전시")
     ]
     
     pool = []
