@@ -136,49 +136,49 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
-    internal_ref = "내 블로그 추천글 (관련 글로 본문에 포함):\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in selected_int])
+    internal_ref = "내 블로그 추천글 (본문 흐름에 맞게 텍스트 링크로 포함):\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in selected_int])
     
     selected_ext = random.sample(user_links, min(len(user_links), 2))
-    user_ext_ref = "외부 링크 (버튼 형식으로 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
+    user_ext_ref = "외부 링크 (섹션 종료 시 버튼으로 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
-    # 구텐베르크 블록 고도화 및 f-string 이스케이프 적용
-    system_prompt = f"""당신은 전문 SEO 마케터이자 블로거입니다. 
-키워드 '{keyword}'에 대해 매우 깊이 있고 분석적인 프리미엄 블로그 글을 작성하세요. 
+    # 구텐베르크 블록 문법 무결성 강화 프롬프트
+    system_prompt = f"""당신은 프리미엄 블로그 콘텐츠를 제작하는 전문 SEO 에디터입니다. 
+키워드 '{keyword}'에 대해 심도 있는 분석과 인사이트가 담긴 3000자 이상의 고품질 블로그 글을 작성하세요.
 
-[현재 시점 정보]
-- 오늘 날짜는 {current_date}입니다. 최신 시사점과 미래 전망을 포함하세요.
+[현재 시점 및 시의성]
+- 기준 날짜: {current_date}
+- 현재 시점의 사회적 분위기와 트렌드를 적극 반영하여 실제 기사처럼 작성하세요.
 
-[카테고리 선택 가이드]
-- 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시 중 키워드와 가장 밀접한 카테고리를 하나 선택하세요.
+[카테고리 및 인물 설정]
+- 카테고리: 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시 중 하나를 엄격히 선택하세요.
+- 이미지 모델: 기본 'Korean person' 설정. 글로벌 이슈인 경우 해당 국가 인종에 맞게 프롬프트를 작성하세요.
 
-[이미지 프롬프트 가이드]
-- 인물은 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요. 
-- 내용이 특정 국가(예: 미국 뉴스 등)에 관한 것이라면 해당 국가/인종에 어울리는 인물로 묘사하세요.
+[필수 사항: 워드프레스 구텐베르크(Gutenberg) 블록 완전 무결성]
+- 모든 콘텐츠는 반드시 표준 구텐베르크 주석으로 감싸야 합니다. 주석이 깨지면 포스팅 전체가 무효화됩니다.
+- **특히 중괄호 {{ }} 내부의 JSON 속성 문법을 절대로 생략하거나 틀리지 마세요.**
 
-[필수 사항: 워드프레스 구텐베르크(Gutenberg) 블록 최적화]
-- 모든 요소는 반드시 유효한 구텐베르크 블록 주석으로 감싸야 합니다. 
-- **주석 내 JSON 구조(예: {{"level":3}})를 완벽하게 유지하세요.**
-- 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
-- 제목: <!-- wp:heading {{"level":2}} --><h2>소제목</h2><!-- /wp:heading --> (H2, H3, H4 적절히 활용)
-- 간격: <!-- wp:spacer {{"height":"30px"}} --><div style="height:30px" aria-hidden="true" class="wp-block-spacer"></div><!-- /wp:spacer --> (섹션 사이에 사용)
-- 구분선: <!-- wp:separator --><hr class="wp-block-separator has-alpha-channel-opacity"/><!-- /wp:separator -->
-- 버튼(외부 링크): 
+주요 블록 코드 가이드:
+1. 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
+2. 제목(H2): <!-- wp:heading {{"level":2}} --><h2>소제목</h2><!-- /wp:heading -->
+3. 제목(H3): <!-- wp:heading {{"level":3}} --><h3>중제목</h3><!-- /wp:heading -->
+4. 간격: <!-- wp:spacer {{"height":"40px"}} --><div style="height:40px" aria-hidden="true" class="wp-block-spacer"></div><!-- /wp:spacer -->
+5. 구분선: <!-- wp:separator --><hr class="wp-block-separator has-alpha-channel-opacity"/><!-- /wp:separator -->
+6. 리스트: <!-- wp:list --><ul><li>항목</li></ul><!-- /wp:list -->
+7. 버튼(외부 링크용): 
 <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
 <div class="wp-block-buttons">
   <!-- wp:button {{"className":"is-style-fill"}} -->
-  <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">클릭 유도 문구</a></div>
+  <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">자세한 정보 확인하기</a></div>
   <!-- /wp:button -->
 </div>
 <!-- /wp:buttons -->
 
-[글쓰기 고도화 지침]
-1. 분석적 서술: '단순 정보 전달'을 넘어 주제의 배경, 영향력, 해결책을 포함하는 전문적인 기사 형태로 작성하세요.
-2. 가독성 및 호흡: 문단은 3~5줄로 구성하여 데스크탑에서 너무 비어 보이지 않게 하고, 모바일에서도 가독성을 확보하세요. 섹션 사이에 Spacer 블록을 활용해 시각적 여유를 주어야 합니다.
-3. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 오직 텍스트 제목으로만 구성하세요.
-4. 링크 전략: 
-   - 내부 링크는 본문 중간에 자연스럽게 "함께 읽어보면 좋은 글" 섹션으로 H3와 함께 배치하세요. 
-   - 외부 링크는 섹션이 끝날 때마다 '관련 정보 확인하기' 등의 버튼 블록으로 삽입하세요. 버튼 텍스트에서 '관련 사이트:'와 같은 문구는 삭제하고 자연스럽게 작성하세요.
-5. 무결성: 답변이 끊기지 않도록 끝까지 완성하고 유효한 JSON을 출력하세요.
+[글쓰기 고도화 가이드라인]
+1. 분석적 어조: "카더라" 식의 정보가 아니라 데이터와 현상에 기반한 전문가적 시각으로 서술하세요.
+2. 레이아웃: 문단은 4~6줄로 구성하여 데스크탑에서 시각적 밀도를 확보하세요. 섹션이 바뀔 때 반드시 Spacer(40px) 블록을 넣어 여백을 주세요.
+3. 소제목: 숫자나 기호(1., 가.)를 절대 쓰지 말고, 섹션의 핵심 내용을 담은 문구로만 구성하세요.
+4. 링크 전략: 내부 링크는 "함께 읽으면 유익한 콘텐츠"라는 메시지와 함께 본문 중간에 텍스트 링크로, 외부 링크는 섹션 하단에 버튼 블록으로 삽입하세요. 버튼 문구에 '관련사이트:' 같은 말은 넣지 마세요.
+5. 무결성: JSON 응답을 끝까지 출력하고 주석 태그가 열린 채로 끝나지 않도록 철저히 검증하세요.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n수집분류힌트: {category_hint}"
@@ -216,6 +216,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
                 
+                # 특수 제어 문자 정제
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
                 data = json.loads(json_str)
                 print(f"✅ AI 콘텐츠 생성 완료! (카테고리: {data.get('category')})", flush=True)
@@ -289,6 +290,7 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ GEMINI_API_KEY 누락", flush=True); return
 
+    # 대한민국 표준시(KST, UTC+9) 적용
     kst = timezone(timedelta(hours=9))
     now = datetime.now(kst)
     current_date_str = now.strftime("%Y년 %m월 %d일 %H시 %M분")
