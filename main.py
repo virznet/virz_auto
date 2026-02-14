@@ -56,7 +56,6 @@ class TrendScraper:
     def get_naver_news_custom(self, url):
         """네이버 뉴스 제목 수집"""
         try:
-            # URL 문자열 정제 (마크다운 잔재 및 공백 완전 제거)
             clean_url = url.strip()
             if '](http' in clean_url:
                 clean_url = clean_url.split('](')[1].split(')')[0]
@@ -67,7 +66,6 @@ class TrendScraper:
             soup = BeautifulSoup(res.text, 'html.parser')
             
             titles = []
-            # 다양한 레이아웃 대응
             for selector in [".sa_text_strong", ".rankingnews_list .list_title", ".cluster_text_headline"]:
                 items = soup.select(selector)
                 if items:
@@ -138,23 +136,18 @@ def generate_article(keyword, category, internal_posts, user_links):
 
 [필수 지침: 소제목 순서 표기 금지]
 - **본문의 소제목(H2, H3, H4 등) 작성 시 리스트의 순서를 나타내는 모든 숫자와 문자를 제외하세요.**
-- 예시 금지 패턴: '1.', '2.', '첫째', '둘째', '가.', '나.', 'A.', 'B.', 'Step 1' 등.
-- 본문 의미상 필요한 연도(예: 2024년)나 수치(예: 50% 증가)는 사용 가능하지만, 제목에 순서를 매기는 행위는 목차 플러그인이 수행하므로 제목은 오직 핵심 키워드 문구로만 구성하세요.
+- 제목에 순서를 매기는 행위는 금지하며 핵심 키워드 문구로만 구성하세요.
 
 [금지 사항 - 절대 준수]
-1. 제목이나 본문 어디에도 '(3000자 분석)', '프롬프트', 'AI 생성', 'Gemini', '포스팅 시작' 등의 메타 정보나 지시어 관련 문구를 포함하지 마세요.
-2. 제목은 깔끔하게 독자의 관심을 끄는 매력적인 문장으로만 작성하세요. 
-3. 버튼 타이틀이나 텍스트에 'AI 권위 링크', '외부 출처' 같은 분류 명칭을 절대 넣지 마세요.
+1. 제목이나 본문 어디에도 제작 지시어 관련 문구(3000자, 프롬프트 등)를 포함하지 마세요.
+2. 버튼 타이틀에 'AI 권위 링크' 등 분류 명칭을 넣지 마세요.
 
 [링크 삽입 규칙]
-1. 내부 링크: 제공된 '내 블로그 추천글' 목록에서 최소 2개를 반드시 본문에 포함하세요.
-2. 외부 링크: 제공된 '외부 링크' 목록에서 최소 2개를 반드시 본문에 포함하세요.
-3. 방식: 문단 끝이나 섹션 하단에 버튼(Gutenberg Button) 형식으로라도 반드시 포함해야 합니다. 
+- 내부 링크 최소 2개, 외부 링크 최소 2개를 반드시 본문 또는 버튼 형식으로 포함하세요.
 
 [가독성 및 어조]
-- 인사말, 자기소개 없이 바로 본론의 핵심으로 시작하세요.
-- 한 문단은 3줄 내외로 유지하고 문단 사이 줄바꿈을 과감하게 활용하여 모바일 가독성을 높이세요.
-- 사람이 직접 고민하고 쓴 것처럼 자연스러운 문체를 사용하세요.
+- 인사말 없이 바로 본론으로 시작하세요.
+- 한 문단은 3줄 내외로 유지하고 줄바꿈을 과감하게 활용하세요.
 
 JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 """
@@ -227,13 +220,18 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ GEMINI_API_KEY 누락", flush=True); return
 
+    # [랜덤 시간 실행 로직] 스케줄러가 정각에 실행하면, 0~55분 사이 랜덤 대기 후 포스팅 시작
+    if not IS_TEST:
+        start_delay = random.randint(0, 3300) # 최대 55분(3300초) 대기
+        print(f"⏳ 매시간 랜덤 분 발행을 위해 {start_delay // 60}분 대기 후 시작합니다...", flush=True)
+        time.sleep(start_delay)
+
     user_links = load_external_links()
     recent_posts = get_recent_posts()
     scraper = TrendScraper()
     
-    print("🚀 SEO 지능형 엔진 기동: 뉴스 섹션 분석 시작...", flush=True)
+    print("🚀 SEO 지능형 엔진 기동...", flush=True)
     
-    # URL 주소를 순수 문자열로 교정하여 No connection adapters 오류 방지
     jobs = [
         ("https://news.naver.com/section/102", "사회"),
         ("https://news.naver.com/section/105", "IT/과학"),
@@ -245,25 +243,22 @@ def main():
     
     pool = []
     for url, cat in jobs:
-        print(f"📡 {cat} 뉴스 수집 중...", flush=True)
         items = scraper.get_naver_news_custom(url)
         for i in items: pool.append({"kw": i, "cat": cat})
-        time.sleep(1)
     
-    if not pool: 
-        print("❌ 수집된 트렌드 키워드가 없습니다.", flush=True); return
+    if not pool: return
     
-    num_posts = 1 if IS_TEST else min(len(pool), 5)
+    # 시간당 1개씩 발행 (스케줄러에 의해 매시간 호출됨)
+    num_posts = 1 
     targets = random.sample(pool, num_posts)
     
     for idx, item in enumerate(targets):
-        print(f"📝 [{idx+1}/{len(targets)}] '{item['kw']}' 포스팅 생성 중...", flush=True)
+        print(f"📝 '{item['kw']}' 포스팅 생성 중...", flush=True)
         data = generate_article(item['kw'], item['cat'], recent_posts, user_links)
         if not data: continue
         
         mid = None
         if data.get('image_prompt'):
-            print("🎨 이미지 생성 중...", flush=True)
             img_data = generate_image_process(data['image_prompt'])
             if img_data: mid = upload_to_wp_media(img_data)
         
@@ -271,11 +266,6 @@ def main():
             print(f"✅ 발행 성공: {data.get('title')}", flush=True)
         else:
             print("❌ 발행 실패", flush=True)
-            
-        if not IS_TEST and idx < len(targets) - 1:
-            wait = random.randint(900, 1800)
-            print(f"⏳ 다음 포스팅까지 {wait//60}분 대기...", flush=True)
-            time.sleep(wait)
 
 if __name__ == "__main__":
     main()
