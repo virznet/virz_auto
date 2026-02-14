@@ -27,7 +27,6 @@ WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
 WP_BASE_URL = "https://virz.net" 
 
 # TEST_MODE 판단 로직 강화
-# 'true', '1', 't', 'yes', 'y' 등을 모두 True로 인정하도록 개선
 test_mode_raw = str(os.environ.get('TEST_MODE', 'false')).strip().lower()
 IS_TEST = test_mode_raw in ['true', '1', 't', 'yes', 'y']
 
@@ -107,7 +106,7 @@ def upload_to_wp_media(img_data):
 # 4. 스마트 콘텐츠 생성
 # ==========================================
 def generate_article(keyword, category, internal_posts, user_links):
-    """Gemini 콘텐츠 생성"""
+    """Gemini 콘텐츠 생성 (구텐베르크 블록 형식 반영)"""
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
@@ -116,6 +115,14 @@ def generate_article(keyword, category, internal_posts, user_links):
 
     system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
 키워드 '{keyword}'에 대해 상세하고 사람이 직접 쓴 듯한 블로그 글을 작성하세요.
+
+[필수 사항: 워드프레스 구텐베르크 블록 형식]
+- 모든 콘텐츠는 워드프레스 구텐베르크(Gutenberg) 블록 주석으로 감싸야 합니다.
+- 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
+- 제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
+- 제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
+- 리스트: <!-- wp:list --><ul><li>항목</li></ul><!-- /wp:list -->
+- 버튼: <!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="URL">텍스트</a></div><!-- /wp:button --></div><!-- /wp:buttons -->
 
 [절대 엄수 사항: 순서 표기 금지]
 1. 본문의 소제목(H2, H3, H4) 및 리스트 작성 시, 순서를 나타내는 모든 숫자와 문자를 제외하세요.
@@ -144,16 +151,43 @@ JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 # 5. 워드프레스 발행 로직
 # ==========================================
 def post_article(data, mid):
-    """최종 발행"""
+    """최종 발행 (태그 로직 포함)"""
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
+    
+    # 태그 처리 및 ID 변환
+    tag_ids = []
+    tags_raw = data.get('tags', [])
+    if tags_raw:
+        for tname in tags_raw:
+            try:
+                # 태그 검색
+                r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth, timeout=10)
+                tid = None
+                if r.status_code == 200:
+                    tags_data = r.json()
+                    tid = next((t['id'] for t in tags_data if t['name'].lower() == tname.lower()), None)
+                
+                # 태그가 없으면 생성
+                if not tid:
+                    cr = requests.post(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags", auth=auth, json={"name": tname}, timeout=10)
+                    if cr.status_code == 201:
+                        tid = cr.json()['id']
+                
+                if tid:
+                    tag_ids.append(tid)
+            except:
+                continue
+
     payload = {
         "title": data.get('title', '제목 없음'), 
         "content": data.get('content', ''), 
         "excerpt": data.get('excerpt', ''),
+        "tags": tag_ids,
         "featured_media": mid, 
         "status": "publish"
     }
+    
     try:
         res = requests.post(url, auth=auth, json=payload, timeout=40)
         return res.status_code == 201
