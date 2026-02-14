@@ -24,7 +24,8 @@ if sys.stdout.encoding != 'utf-8':
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
-WP_BASE_URL = "[https://virz.net](https://virz.net)" 
+# [수정] URL은 마크다운 형식이 아닌 순수 문자열이어야 합니다.
+WP_BASE_URL = "https://virz.net" 
 
 # TEST_MODE 판단 로직 (환경 변수가 'true'이거나 secret이 'true'로 설정된 경우)
 test_mode_raw = str(os.environ.get('TEST_MODE', 'false')).strip().lower()
@@ -47,7 +48,7 @@ def clean_json_string(text):
 # ==========================================
 def load_external_links():
     file_path = "links.json"
-    default_links = [{"title": "virz.net", "url": "https://virz.net"}]
+    default_links = [{"title": "virz.net", "url": "[https://virz.net](https://virz.net)"}]
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -86,7 +87,7 @@ def get_recent_posts():
     return []
 
 def generate_image_process(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
+    url = f"[https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=](https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=){GEMINI_API_KEY}"
     final_prompt = f"Professional photography for: {prompt}. High resolution, cinematic. NO TEXT."
     payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
     
@@ -117,7 +118,7 @@ def upload_to_wp_media(img_data):
 # ==========================================
 def generate_article(keyword, category, internal_posts, user_links):
     model_id = "gemini-2.5-flash-preview-09-2025"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
+    url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model_id}:generateContent?key={GEMINI_API_KEY}"
     
     internal_ref = "내 블로그 추천글:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in internal_posts[:2]])
     user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in user_links[:2]])
@@ -217,8 +218,11 @@ def post_article(data, mid):
     
     try:
         res = requests.post(url, auth=auth, json=payload, timeout=40)
+        if res.status_code != 201:
+            print(f"⚠️ 발행 실패 상세: {res.status_code} - {res.text}")
         return res.status_code == 201
-    except Exception: pass
+    except Exception as e:
+        print(f"⚠️ 포스팅 도중 예외 발생: {e}")
     return False
 
 # ==========================================
@@ -245,12 +249,12 @@ def main():
     print("🚀 프로세스 시작...")
     
     news_sections = [
-        "https://news.naver.com/section/102",
-        "https://news.naver.com/section/105",
-        "https://news.naver.com/breakingnews/section/103/241", 
-        "https://news.naver.com/breakingnews/section/103/237", 
-        "https://news.naver.com/breakingnews/section/103/376", 
-        "https://news.naver.com/breakingnews/section/103/242"
+        "[https://news.naver.com/section/102](https://news.naver.com/section/102)",
+        "[https://news.naver.com/section/105](https://news.naver.com/section/105)",
+        "[https://news.naver.com/breakingnews/section/103/241](https://news.naver.com/breakingnews/section/103/241)", 
+        "[https://news.naver.com/breakingnews/section/103/237](https://news.naver.com/breakingnews/section/103/237)", 
+        "[https://news.naver.com/breakingnews/section/103/376](https://news.naver.com/breakingnews/section/103/376)", 
+        "[https://news.naver.com/breakingnews/section/103/242](https://news.naver.com/breakingnews/section/103/242)"
     ]
     
     pool = []
