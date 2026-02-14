@@ -141,9 +141,8 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
     selected_ext = random.sample(user_links, min(len(user_links), 2))
     user_ext_ref = "외부 링크 (섹션 종료 시 버튼으로 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
-    # 구텐베르크 블록 문법 무결성 강화 프롬프트
     system_prompt = f"""당신은 프리미엄 블로그 콘텐츠를 제작하는 전문 SEO 에디터입니다. 
-키워드 '{keyword}'에 대해 심도 있는 분석과 인사이트가 담긴 3000자 이상의 고품질 블로그 글을 작성하세요.
+키워드 '{keyword}'에 대해 심도 있는 분석과 인사이트가 담긴 고품질 블로그 글을 작성하세요.
 
 [현재 시점 및 시의성]
 - 기준 날짜: {current_date}
@@ -154,31 +153,29 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 - 이미지 모델: 기본 'Korean person' 설정. 글로벌 이슈인 경우 해당 국가 인종에 맞게 프롬프트를 작성하세요.
 
 [필수 사항: 워드프레스 구텐베르크(Gutenberg) 블록 완전 무결성]
-- 모든 콘텐츠는 반드시 표준 구텐베르크 주석으로 감싸야 합니다. 주석이 깨지면 포스팅 전체가 무효화됩니다.
-- **특히 중괄호 {{ }} 내부의 JSON 속성 문법을 절대로 생략하거나 틀리지 마세요.**
+- 모든 콘텐츠는 반드시 표준 구텐베르크 주석으로 감싸야 합니다. 
+- **주석 내의 JSON 데이터(예: {{"level":2}})는 반드시 이중 중괄호를 사용하여 JSON 구조가 깨지지 않게 하세요.**
+- 모든 HTML 태그 내의 큰따옴표(")는 백슬래시(\\")로 이스케이프해야 유효한 JSON 문자열이 됩니다.
 
-주요 블록 코드 가이드:
+주요 블록 가이드:
 1. 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
 2. 제목(H2): <!-- wp:heading {{"level":2}} --><h2>소제목</h2><!-- /wp:heading -->
-3. 제목(H3): <!-- wp:heading {{"level":3}} --><h3>중제목</h3><!-- /wp:heading -->
-4. 간격: <!-- wp:spacer {{"height":"40px"}} --><div style="height:40px" aria-hidden="true" class="wp-block-spacer"></div><!-- /wp:spacer -->
-5. 구분선: <!-- wp:separator --><hr class="wp-block-separator has-alpha-channel-opacity"/><!-- /wp:separator -->
-6. 리스트: <!-- wp:list --><ul><li>항목</li></ul><!-- /wp:list -->
-7. 버튼(외부 링크용): 
+3. 간격: <!-- wp:spacer {{"height":"40px"}} --><div style="height:40px" aria-hidden="true" class="wp-block-spacer"></div><!-- /wp:spacer -->
+4. 버튼(외부 링크): 
 <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
 <div class="wp-block-buttons">
   <!-- wp:button {{"className":"is-style-fill"}} -->
-  <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">자세한 정보 확인하기</a></div>
+  <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">텍스트</a></div>
   <!-- /wp:button -->
 </div>
 <!-- /wp:buttons -->
 
 [글쓰기 고도화 가이드라인]
-1. 분석적 어조: "카더라" 식의 정보가 아니라 데이터와 현상에 기반한 전문가적 시각으로 서술하세요.
-2. 레이아웃: 문단은 4~6줄로 구성하여 데스크탑에서 시각적 밀도를 확보하세요. 섹션이 바뀔 때 반드시 Spacer(40px) 블록을 넣어 여백을 주세요.
-3. 소제목: 숫자나 기호(1., 가.)를 절대 쓰지 말고, 섹션의 핵심 내용을 담은 문구로만 구성하세요.
-4. 링크 전략: 내부 링크는 "함께 읽으면 유익한 콘텐츠"라는 메시지와 함께 본문 중간에 텍스트 링크로, 외부 링크는 섹션 하단에 버튼 블록으로 삽입하세요. 버튼 문구에 '관련사이트:' 같은 말은 넣지 마세요.
-5. 무결성: JSON 응답을 끝까지 출력하고 주석 태그가 열린 채로 끝나지 않도록 철저히 검증하세요.
+1. 분석적 어조: 데이터와 현상에 기반한 전문가적 시각으로 서술하세요.
+2. 레이아웃: 문단은 4~6줄로 구성하고 섹션 사이에는 반드시 Spacer(40px) 블록을 넣어 여백을 주세요.
+3. 소제목 규칙: 숫자나 기호(1., 가.)를 절대 쓰지 말고 오직 텍스트 제목으로만 구성하세요.
+4. 링크 전략: 외부 링크는 버튼 블록으로 삽입하고, 버튼 문구에 '관련사이트:' 같은 말은 생략하세요.
+5. 무결성: 결코 답변을 중간에 끊지 말고 유효한 JSON 형식을 끝까지 완성하여 출력하세요.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n수집분류힌트: {category_hint}"
@@ -216,7 +213,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
                 
-                # 특수 제어 문자 정제
+                # 제어 문자 및 줄바꿈 정제 강화
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
                 data = json.loads(json_str)
                 print(f"✅ AI 콘텐츠 생성 완료! (카테고리: {data.get('category')})", flush=True)
