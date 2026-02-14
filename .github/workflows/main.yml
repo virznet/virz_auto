@@ -1,36 +1,35 @@
 name: WordPress Auto Posting
 
 on:
-schedule:
-# 한국 시간(KST)은 UTC+9입니다.
-# 06:00 KST ~ 01:00 KST (다음날) 까지 매시간 정각 실행 (총 20회)
-# UTC 기준: 21:00, 22:00, 23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00, 07:00, 08:00, 09:00, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00, 16:00
-- cron: '0 21,22,23,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16 * * *'
-workflow_dispatch: # 수동 실행 버튼 활성화
+  schedule:
+    # 한국 시간(KST) 기준 오전 07:00 ~ 익일 오전 01:00까지 매시간 정각 실행
+    # UTC 기준: 22:00 (KST 07시) ~ 16:00 (KST 01시)
+    - cron: '0 22,23,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16 * * *'
+  workflow_dispatch: # 수동 실행 버튼
 
 jobs:
-run-auto-post:
-runs-on: ubuntu-latest
-timeout-minutes: 180 # 랜덤 대기 시간(최대 55분)을 고려하여 넉넉하게 설정
+  run-auto-post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180 # 랜덤 대기 시간(최대 55분)을 고려한 설정
 
-steps:
-  - name: Checkout code
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  - name: Set up Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-  - name: Install dependencies
-    run: |
-      pip install requests beautifulsoup4 Pillow
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 Pillow
 
-  - name: Run posting script
-    env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      WP_USERNAME: ${{ secrets.WP_USERNAME }}
-      WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-      # TEST_MODE가 true이면 랜덤 대기 없이 즉시 1개 발행 후 종료됩니다.
-      TEST_MODE: 'false' 
-    run: python -u main.py
+      - name: Run posting script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          # TEST_MODE가 'false'여야 랜덤 대기 로직이 작동하여 '랜덤 분'에 포스팅됩니다.
+          TEST_MODE: 'false'
+        run: python -u main.py
