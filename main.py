@@ -222,7 +222,7 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] URL 마크다운 형식 제거 및 순수 문자열 URL로 수정
+    # [수집 설정] 모든 URL에서 마크다운 링크 형식을 제거하고 순수한 URL 문자열로 수정함
     jobs = [
         ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회"),
         ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/과학"),
