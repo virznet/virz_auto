@@ -62,21 +62,20 @@ class TrendScraper:
             
             titles = []
             
-            # 1. 랭킹 뉴스 레이아웃 확인 (.rankingnews_list)
+            # 1. 속보/섹션 뉴스 레이아웃 확인 (.sa_text_strong)
+            section_items = soup.select(".sa_text_strong")
+            if section_items:
+                titles.extend([t.text.strip() for t in section_items])
+            
+            # 2. 랭킹 뉴스 레이아웃 확인 (.rankingnews_list)
             ranking_items = soup.select(".rankingnews_list .list_title")
             if ranking_items:
-                titles = [t.text.strip() for t in ranking_items]
+                titles.extend([t.text.strip() for t in ranking_items])
             
-            # 2. 섹션/속보 뉴스 레이아웃 확인 (.sa_text_strong)
-            if not titles:
-                section_items = soup.select(".sa_text_strong")
-                if section_items:
-                    titles = [t.text.strip() for t in section_items]
-            
-            # 3. 구형 또는 대체 레이아웃 확인 (.cluster_text_headline)
+            # 3. 구형 또는 헤드라인 레이아웃 확인 (.cluster_text_headline)
             if not titles:
                 alt_items = soup.select(".cluster_text_headline")
-                titles = [t.text.strip() for t in alt_items]
+                titles.extend([t.text.strip() for t in alt_items])
 
             # 중복 제거 및 빈 값 제외 후 최대 10개 반환
             unique_titles = list(dict.fromkeys([t for t in titles if t]))
@@ -223,10 +222,10 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] 순수 URL 문자열로 수정됨
+    # [수집 설정] 순수 URL 문자열로 수정
     jobs = [
-        ("[https://news.naver.com/main/ranking/popularDay.naver?sectionId=102](https://news.naver.com/main/ranking/popularDay.naver?sectionId=102)", "사회"),
-        ("[https://news.naver.com/main/ranking/popularDay.naver?sectionId=105](https://news.naver.com/main/ranking/popularDay.naver?sectionId=105)", "IT/과학"),
+        ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회"),
+        ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/과학"),
         ("[https://news.naver.com/breakingnews/section/103/241](https://news.naver.com/breakingnews/section/103/241)", "건강정보"),
         ("[https://news.naver.com/breakingnews/section/103/237](https://news.naver.com/breakingnews/section/103/237)", "여행/레저"),
         ("[https://news.naver.com/breakingnews/section/103/376](https://news.naver.com/breakingnews/section/103/376)", "패션/뷰티"),
@@ -237,14 +236,14 @@ def main():
     for url, cat in jobs:
         print(f"📡 {cat} 뉴스 수집 중...", flush=True)
         items = scraper.get_naver_news_custom(url)
-        for i in items: # 수집된 모든 키워드를 풀에 등록 (필터링은 나중에 함)
+        for i in items:
             pool.append({"kw": i, "cat": cat})
         time.sleep(1)
     
     if not pool: 
         print("❌ 수집된 트렌드 키워드가 없습니다. URL 또는 선택자를 확인하세요.", flush=True); return
     
-    # 무작위로 추출하여 포스팅 (테스트 모드면 1개, 평상시는 최대 5개)
+    # 무작위로 추출하여 포스팅
     num_posts = 1 if IS_TEST else min(len(pool), 5)
     targets = random.sample(pool, num_posts)
     
@@ -266,7 +265,7 @@ def main():
             print("❌ 발행 실패", flush=True)
             
         if not IS_TEST and idx < len(targets) - 1:
-            wait = random.randint(900, 1800) # 15분~30분 간격 발행
+            wait = random.randint(900, 1800)
             print(f"⏳ 다음 포스팅까지 {wait//60}분 대기...", flush=True)
             time.sleep(wait)
 
