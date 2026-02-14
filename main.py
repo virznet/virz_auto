@@ -222,7 +222,7 @@ def main():
     
     print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
     
-    # [수집 설정] 순수 URL 문자열로 수정
+    # [수집 설정] 모든 URL을 마크다운 형식이 아닌 순수 문자열로 수정
     jobs = [
         ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회"),
         ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/과학"),
@@ -236,6 +236,8 @@ def main():
     for url, cat in jobs:
         print(f"📡 {cat} 뉴스 수집 중...", flush=True)
         items = scraper.get_naver_news_custom(url)
+        if not items:
+            print(f"⚠️ {cat} 뉴스 수집 실패 (데이터 없음)", flush=True)
         for i in items:
             pool.append({"kw": i, "cat": cat})
         time.sleep(1)
