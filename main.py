@@ -46,7 +46,7 @@ def load_external_links():
     return default_links
 
 class TrendScraper:
-    """사용자가 지정한 네이버 뉴스 경로에서 데이터를 수집하는 스크래퍼"""
+    """네이버 뉴스 경로에서 데이터를 수집하는 스크래퍼"""
     def __init__(self):
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -54,32 +54,30 @@ class TrendScraper:
         }
 
     def get_naver_news_custom(self, url):
-        """네이버 뉴스 랭킹 또는 섹션/속보 페이지에서 제목 수집"""
+        """네이버 뉴스 제목 수집"""
         try:
+            # URL 문자열 정제 (마크다운 잔재 및 공백 완전 제거)
             clean_url = url.strip()
+            if '](http' in clean_url:
+                clean_url = clean_url.split('](')[1].split(')')[0]
+            clean_url = clean_url.strip('[]() ')
+
             res = requests.get(clean_url, headers=self.headers, timeout=15)
             res.encoding = res.apparent_encoding if res.apparent_encoding else 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
             
             titles = []
+            # 다양한 레이아웃 대응
+            for selector in [".sa_text_strong", ".rankingnews_list .list_title", ".cluster_text_headline"]:
+                items = soup.select(selector)
+                if items:
+                    titles.extend([t.text.strip() for t in items])
             
-            section_items = soup.select(".sa_text_strong")
-            if section_items:
-                titles.extend([t.text.strip() for t in section_items])
-            
-            ranking_items = soup.select(".rankingnews_list .list_title")
-            if ranking_items:
-                titles.extend([t.text.strip() for t in ranking_items])
-            
-            if not titles:
-                alt_items = soup.select(".cluster_text_headline")
-                titles.extend([t.text.strip() for t in alt_items])
-
             unique_titles = list(dict.fromkeys([t for t in titles if t]))
             return unique_titles[:10]
             
         except Exception as e:
-            print(f"⚠️ 네이버 뉴스 스크래핑 오류 ({url[:40]}...): {e}", flush=True)
+            print(f"⚠️ 스크래핑 오류 ({url[:30]}...): {e}", flush=True)
             return []
 
 # ==========================================
@@ -87,7 +85,7 @@ class TrendScraper:
 # ==========================================
 def get_recent_posts():
     try:
-        res = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=10&_fields=title,link", timeout=10)
+        res = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=15&_fields=title,link", timeout=10)
         if res.status_code == 200:
             return [{"title": p['title']['rendered'], "link": p['link']} for p in res.json()]
     except Exception as e:
@@ -96,7 +94,7 @@ def get_recent_posts():
 
 def generate_image_process(prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
-    final_prompt = f"Professional photography for: {prompt}. High resolution, 8k, cinematic lighting. Strictly NO TEXT, NO LETTERS, NO WORDS, NO FONTS."
+    final_prompt = f"Professional photography for: {prompt}. High resolution, 8k, cinematic lighting. Strictly NO TEXT, NO LETTERS, NO WORDS."
     payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
     try:
         response = requests.post(url, json=payload, timeout=150)
@@ -129,28 +127,39 @@ def generate_article(keyword, category, internal_posts, user_links):
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
-    internal_ref = "내 블로그 추천글:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in internal_posts]) if internal_posts else ""
+    selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
+    internal_ref = "내 블로그 추천글:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in selected_int])
+    
     selected_ext = random.sample(user_links, min(len(user_links), 2))
-    user_ext_ref = "제공된 외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
+    user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
     system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
-키워드 '{keyword}'에 대해 3,000자 이상의 매우 상세하고 가치 있는 블로그 글을 작성하세요.
+키워드 '{keyword}'에 대해 매우 상세하고 가공되지 않은 사람이 쓴 듯한 블로그 글을 작성하세요.
 
-[필수 사항: JSON 무결성]
-- 반드시 유효한 JSON 형식이어야 합니다.
-- 'content' 필드 내의 HTML 태그 속성에는 큰따옴표(") 대신 작은따옴표(')를 사용하세요. 
-- 모든 본문 내 큰따옴표는 반드시 \\"로 이스케이프하세요.
+[필수 지침: 소제목 순서 표기 금지]
+- **본문의 소제목(H2, H3, H4 등) 작성 시 리스트의 순서를 나타내는 모든 숫자와 문자를 제외하세요.**
+- 예시 금지 패턴: '1.', '2.', '첫째', '둘째', '가.', '나.', 'A.', 'B.', 'Step 1' 등.
+- 본문 의미상 필요한 연도(예: 2024년)나 수치(예: 50% 증가)는 사용 가능하지만, 제목에 순서를 매기는 행위는 목차 플러그인이 수행하므로 제목은 오직 핵심 키워드 문구로만 구성하세요.
 
-[휴먼 터치 및 가독성 가이드]
-1. 자연스러운 어조: 사람이 직접 쓴 것처럼 친근한 말투를 사용하세요. 전문 블로거의 페르소나를 유지하세요.
-   - **중요: 첫 문장에 '안녕하세요', '저는 ~입니다'와 같은 인사말이나 자기소개를 절대로 포함하지 마세요. 바로 본론의 핵심 내용으로 시작하세요.**
-2. 모바일 최적화: 한 문단은 3줄 내외로 유지하고, 문단 사이에는 과감하게 줄바꿈을 넣으세요.
-3. 태그 생성: 본문 내용과 관련된 키워드 5~8개를 'tags' 리스트에 담아주세요.
+[금지 사항 - 절대 준수]
+1. 제목이나 본문 어디에도 '(3000자 분석)', '프롬프트', 'AI 생성', 'Gemini', '포스팅 시작' 등의 메타 정보나 지시어 관련 문구를 포함하지 마세요.
+2. 제목은 깔끔하게 독자의 관심을 끄는 매력적인 문장으로만 작성하세요. 
+3. 버튼 타이틀이나 텍스트에 'AI 권위 링크', '외부 출처' 같은 분류 명칭을 절대 넣지 마세요.
+
+[링크 삽입 규칙]
+1. 내부 링크: 제공된 '내 블로그 추천글' 목록에서 최소 2개를 반드시 본문에 포함하세요.
+2. 외부 링크: 제공된 '외부 링크' 목록에서 최소 2개를 반드시 본문에 포함하세요.
+3. 방식: 문단 끝이나 섹션 하단에 버튼(Gutenberg Button) 형식으로라도 반드시 포함해야 합니다. 
+
+[가독성 및 어조]
+- 인사말, 자기소개 없이 바로 본론의 핵심으로 시작하세요.
+- 한 문단은 3줄 내외로 유지하고 문단 사이 줄바꿈을 과감하게 활용하여 모바일 가독성을 높이세요.
+- 사람이 직접 고민하고 쓴 것처럼 자연스러운 문체를 사용하세요.
 
 JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
 """
     
-    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}\n위 정보를 바탕으로 완성도 높은 JSON 데이터를 생성하세요."
+    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}"
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -172,7 +181,7 @@ JSON 키: 'title', 'content', 'excerpt', 'tags', 'image_prompt'.
     return None
 
 # ==========================================
-# 5. 워드프레스 발행 로직 (태그 처리 보강)
+# 5. 워드프레스 발행 로직
 # ==========================================
 def post_article(data, mid):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
@@ -180,43 +189,20 @@ def post_article(data, mid):
     
     tag_ids = []
     tags_raw = data.get('tags', [])
-    
-    # 태그 데이터가 리스트인지 문자열인지 확인 후 처리
     if tags_raw:
-        if isinstance(tags_raw, str):
-            tag_names = [t.strip() for t in tags_raw.split(',') if t.strip()]
-        else:
-            tag_names = [str(t).strip() for t in tags_raw if str(t).strip()]
-            
+        tag_names = tags_raw if isinstance(tags_raw, list) else [t.strip() for t in str(tags_raw).split(',') if t.strip()]
         for tname in tag_names:
             try:
-                # 1. 기존 태그 검색 (정확한 매칭을 위해 리스트 전체 탐색)
                 r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth, timeout=10)
                 tid = None
                 if r.status_code == 200:
                     tags_data = r.json()
-                    if isinstance(tags_data, list):
-                        for t_obj in tags_data:
-                            if t_obj['name'].lower() == tname.lower():
-                                tid = t_obj['id']
-                                break
-                
-                # 2. 태그가 없으면 새로 생성
+                    tid = next((t['id'] for t in tags_data if t['name'].lower() == tname.lower()), None)
                 if not tid:
                     cr = requests.post(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags", auth=auth, json={"name": tname}, timeout=10)
-                    if cr.status_code == 201:
-                        tid = cr.json()['id']
-                    elif cr.status_code == 400: # 이미 존재하는 경우 다시 한 번 검색 시도
-                        r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth, timeout=10)
-                        if r.status_code == 200:
-                            tags_data = r.json()
-                            tid = next((t['id'] for t in tags_data if t['name'].lower() == tname.lower()), None)
-                
-                if tid:
-                    tag_ids.append(tid)
-            except Exception as e:
-                print(f"⚠️ 태그 처리 중 오류 ({tname}): {e}", flush=True)
-                continue
+                    if cr.status_code == 201: tid = cr.json()['id']
+                if tid: tag_ids.append(tid)
+            except: continue
 
     payload = {
         "title": data.get('title', '제목 없음'), 
@@ -245,8 +231,9 @@ def main():
     recent_posts = get_recent_posts()
     scraper = TrendScraper()
     
-    print("🚀 지정된 네이버 뉴스 섹션 분석 및 포스팅 엔진 가동...", flush=True)
+    print("🚀 SEO 지능형 엔진 기동: 뉴스 섹션 분석 시작...", flush=True)
     
+    # URL 주소를 순수 문자열로 교정하여 No connection adapters 오류 방지
     jobs = [
         ("https://news.naver.com/section/102", "사회"),
         ("https://news.naver.com/section/105", "IT/과학"),
@@ -260,10 +247,7 @@ def main():
     for url, cat in jobs:
         print(f"📡 {cat} 뉴스 수집 중...", flush=True)
         items = scraper.get_naver_news_custom(url)
-        if not items:
-            print(f"⚠️ {cat} 뉴스 수집 실패 (데이터 없음)", flush=True)
-        for i in items:
-            pool.append({"kw": i, "cat": cat})
+        for i in items: pool.append({"kw": i, "cat": cat})
         time.sleep(1)
     
     if not pool: 
@@ -273,14 +257,13 @@ def main():
     targets = random.sample(pool, num_posts)
     
     for idx, item in enumerate(targets):
-        print(f"📝 [{idx+1}/{len(targets)}] '{item['kw']}' ({item['cat']}) 포스팅 시작...", flush=True)
-        
+        print(f"📝 [{idx+1}/{len(targets)}] '{item['kw']}' 포스팅 생성 중...", flush=True)
         data = generate_article(item['kw'], item['cat'], recent_posts, user_links)
         if not data: continue
         
         mid = None
         if data.get('image_prompt'):
-            print("🎨 이미지 생성 및 최적화 중...", flush=True)
+            print("🎨 이미지 생성 중...", flush=True)
             img_data = generate_image_process(data['image_prompt'])
             if img_data: mid = upload_to_wp_media(img_data)
         
