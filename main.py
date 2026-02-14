@@ -56,7 +56,7 @@ class TrendScraper:
     def get_naver_news_custom(self, url):
         try:
             clean_url = url.strip()
-            # 마크다운 링크 형식 제거용 정규식 (방어적 코드)
+            # 마크다운 링크 형식 제거용 정규식
             if clean_url.startswith('['):
                 match = re.search(r'\((.*?)\)', clean_url)
                 if match:
@@ -102,18 +102,22 @@ def generate_image_process(prompt):
         response = requests.post(url, json=payload, timeout=150)
         if response.status_code == 200:
             result = response.json()
-            b64_data = result['predictions'][0]['bytesBase64Encoded']
-            img_data = base64.b64decode(b64_data)
-            img = Image.open(io.BytesIO(img_data))
-            if img.mode != 'RGB': img = img.convert('RGB')
-            out = io.BytesIO()
-            img.save(out, format='JPEG', quality=85, optimize=True)
-            print("✨ 이미지 생성 완료!", flush=True)
-            return out.getvalue()
+            # [수정] predictions 키 존재 여부 확인 로직 추가
+            if 'predictions' in result and len(result['predictions']) > 0:
+                b64_data = result['predictions'][0]['bytesBase64Encoded']
+                img_data = base64.b64decode(b64_data)
+                img = Image.open(io.BytesIO(img_data))
+                if img.mode != 'RGB': img = img.convert('RGB')
+                out = io.BytesIO()
+                img.save(out, format='JPEG', quality=85, optimize=True)
+                print("✨ 이미지 생성 완료!", flush=True)
+                return out.getvalue()
+            else:
+                print(f"⚠️ 이미지 생성 실패: 응답에 'predictions' 데이터가 없습니다. (Response: {result})", flush=True)
         else:
-            print(f"❌ 이미지 생성 실패 (HTTP {response.status_code})", flush=True)
+            print(f"❌ 이미지 생성 실패 (HTTP {response.status_code}: {response.text})", flush=True)
     except Exception as e:
-        print(f"❌ 이미지 생성 중 오류: {e}", flush=True)
+        print(f"❌ 이미지 생성 중 오류 발생: {e}", flush=True)
     return None
 
 def upload_to_wp_media(img_data):
@@ -127,6 +131,8 @@ def upload_to_wp_media(img_data):
             media_id = res.json()['id']
             print(f"✅ 미디어 업로드 성공 (ID: {media_id})", flush=True)
             return media_id
+        else:
+            print(f"❌ 미디어 업로드 실패 (HTTP {res.status_code})", flush=True)
     except Exception as e:
         print(f"❌ 미디어 업로드 중 오류: {e}", flush=True)
     return None
@@ -165,7 +171,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 - 제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
 - 제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
 - 제목(H4): <!-- wp:heading {{"level":4}} --><h4>제목</h4><!-- /wp:heading -->
-- 버튼 블록: 
+- 버튼 블록(외부 링크용): 
   <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
   <div class="wp-block-buttons">
     <!-- wp:button {{"className":"is-style-fill"}} -->
@@ -179,7 +185,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 2. 주석 무결성: 구텐베르크 주석 내의 중괄호 및 따옴표(예: {{"level":3}})가 JSON 데이터 구조와 충돌하지 않도록 문자열 내에서 완벽하게 표현하세요. 태그가 열린 채로 끝나지 않도록 반드시 닫는 태그(예: <!-- /wp:heading -->)를 확인하세요.
 3. 서술 방식: 독자에게 정보를 단순히 전달하는 것을 넘어, 인사이트를 제공하는 전문적인 어조를 유지하세요.
 4. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 오직 텍스트로만 구성하세요.
-5. 버튼 활용: 본문 중간이나 섹션 끝에 외부 링크를 버튼 블록으로 삽입하세요. 버튼 텍스트에는 불필요한 머리말을 제거하고 자연스럽고 클릭을 유도하는 문구만 넣으세요.
+5. 버튼 활용: 본문 중간이나 섹션 끝에 외부 링크를 버튼 블록으로 삽입하세요. 버튼 텍스트에는 '관련 사이트:'와 같은 불필요한 머리말을 제거하고 자연스럽고 클릭을 유도하는 텍스트만 사용하세요.
 6. 가독성: 한 문단은 3~5줄 내외로 구성하여 데스크탑과 모바일 모두에서 풍성하면서도 읽기 편하게 만드세요.
 7. 답변 무결성: JSON 형식을 엄수하고 중간에 끊기지 않도록 하세요.
 """
@@ -218,10 +224,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
                 if json_str.startswith("```"):
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
-                
-                # 비가시적 제어 문자 및 줄바꿈 문자 정제 로직 강화
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
-                
                 data = json.loads(json_str)
                 print(f"✅ AI 콘텐츠 생성 완료! (카테고리: {data.get('category')})", flush=True)
                 return data
