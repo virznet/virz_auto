@@ -10,6 +10,7 @@ import sys
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 from PIL import Image
+from datetime import datetime
 
 # 콘솔 출력 시 한글 깨짐 방지 설정
 if sys.stdout.encoding != 'utf-8':
@@ -55,6 +56,12 @@ class TrendScraper:
     def get_naver_news_custom(self, url):
         try:
             clean_url = url.strip()
+            # 마크다운 링크 형식 제거용 정규식
+            if clean_url.startswith('['):
+                match = re.search(r'\((.*?)\)', clean_url)
+                if match:
+                    clean_url = match.group(1)
+            
             res = requests.get(clean_url, headers=self.headers, timeout=15)
             res.encoding = res.apparent_encoding if res.apparent_encoding else 'utf-8'
             soup = BeautifulSoup(res.text, 'html.parser')
@@ -86,7 +93,10 @@ def get_recent_posts():
 def generate_image_process(prompt):
     print(f"🎨 이미지 생성 API 호출 중... (Prompt: {prompt[:30]}...)", flush=True)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
-    final_prompt = f"Professional photography for: {prompt}. High resolution, 8k, cinematic lighting. Strictly NO TEXT, NO LETTERS, NO WORDS."
+    
+    # 인종 및 퀄리티 보정 프롬프트 추가
+    final_prompt = f"Professional commercial photography for: {prompt}. High resolution, 8k, cinematic lighting, sharp focus. Strictly NO TEXT, NO LETTERS, NO WORDS."
+    
     payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
     try:
         response = requests.post(url, json=payload, timeout=150)
@@ -97,7 +107,7 @@ def generate_image_process(prompt):
             img = Image.open(io.BytesIO(img_data))
             if img.mode != 'RGB': img = img.convert('RGB')
             out = io.BytesIO()
-            img.save(out, format='JPEG', quality=70, optimize=True)
+            img.save(out, format='JPEG', quality=85, optimize=True)
             print("✨ 이미지 생성 완료!", flush=True)
             return out.getvalue()
         else:
@@ -124,8 +134,8 @@ def upload_to_wp_media(img_data):
 # ==========================================
 # 4. 스마트 콘텐츠 생성
 # ==========================================
-def generate_article(keyword, category, internal_posts, user_links):
-    print(f"🤖 Gemini API를 통한 콘텐츠 생성 시작... (약 1-2분 소요)", flush=True)
+def generate_article(keyword, category_hint, internal_posts, user_links, current_date):
+    print(f"🤖 Gemini API를 통한 콘텐츠 생성 시작...", flush=True)
     model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
@@ -135,37 +145,44 @@ def generate_article(keyword, category, internal_posts, user_links):
     selected_ext = random.sample(user_links, min(len(user_links), 2))
     user_ext_ref = "외부 링크 (필수 2개 이상 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
-    system_prompt = f"""당신은 {category} 분야의 전문 SEO 블로거입니다. 
+    system_prompt = f"""당신은 전문 SEO 블로거입니다. 
 키워드 '{keyword}'에 대해 매우 상세하고 사람이 직접 작성한 것 같은 품질의 블로그 글을 작성하세요.
 
+[현재 시점 정보]
+- 오늘 날짜는 {current_date}입니다. 이 날짜를 기준으로 시의성 있는 정보를 제공하세요.
+
+[카테고리 선택 가이드]
+- 아래 제공된 카테고리 리스트 중 본문의 내용과 가장 잘 어울리는 하나를 반드시 선택하여 'category' 필드에 담으세요.
+- 리스트: 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시
+- 기본값은 '트렌드'입니다.
+
+[이미지 프롬프트 가이드]
+- 'image_prompt' 작성 시, 인물이 포함될 경우 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요. 
+- 문맥에 따라 인종을 변경할 수 있습니다.
+
 [필수 사항: 워드프레스 구텐베르크 블록 형식]
-- 모든 콘텐츠는 워드프레스 구텐베르크(Gutenberg) 블록 주석으로 감싸야 합니다.
-- 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
-- 제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
-- 제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
-- 버튼: <!-- wp:buttons --><div class="wp-block-buttons"><!-- wp:button --><div class="wp-block-button"><a class="wp-block-button__link" href="URL">텍스트</a></div><!-- /wp:button --></div><!-- /wp:buttons -->
+- 모든 콘텐츠는 구텐베르크 블록 주석(<!-- wp:... -->)으로 감싸야 합니다.
 
 [필수 가이드: 휴먼 라이팅 및 가독성]
-1. 도입부: 인사말('안녕하세요'), 자기소개 등을 절대 하지 마세요. 본론으로 즉시 시작하세요.
-2. 소제목 규칙: 소제목(H2, H3, H4) 작성 시 리스트 순서를 나타내는 숫자(1., 2.), 문자(가., A.), 서수(첫째, 둘째)를 절대 사용하지 마세요.
-3. 가독성 최적화: 데스크탑과 모바일 환경을 모두 고려하여, 한 문단은 3~5줄 내외의 충분한 길이를 갖도록 작성하세요. 문단 사이에는 적절한 여백을 두어 시각적인 피로도를 낮추되, 너무 듬성듬성해 보이지 않게 조절하세요.
-4. 금지 문구: 제목이나 본문에 '3000자 분석', 'AI 생성', '프롬프트'와 같은 단어를 절대 노출하지 마세요.
-5. JSON 무결성: 모든 텍스트 내의 큰따옴표는 반드시 백슬래시(\\")로 이스케이프하고, 유효한 JSON 형식을 유지하세요.
+1. 도입부: 인사말 금지. 본론으로 즉시 시작.
+2. 소제목 규칙: 숫자나 기호(1., 가., 첫째)를 절대 사용하지 마세요.
+3. 가독성 최적화: 한 문단은 3~5줄 내외의 충분한 길이를 갖도록 작성하세요. 너무 짧거나 듬성듬성해 보이지 않게 하세요.
+4. JSON 무결성: 답변이 끊기지 않도록 끝까지 완성하여 유효한 JSON을 출력하세요.
 """
     
-    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}"
+    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n수집분류힌트: {category_hint}"
     
-    # JSON 파싱 에러를 방지하기 위해 Response Schema 정의
     response_schema = {
         "type": "object",
         "properties": {
             "title": {"type": "string"},
+            "category": {"type": "string", "enum": ["트렌드", "건강정보", "여행/레저", "패션/뷰티", "공연/전시"]},
             "content": {"type": "string"},
             "excerpt": {"type": "string"},
             "tags": {"type": "array", "items": {"type": "string"}},
             "image_prompt": {"type": "string"}
         },
-        "required": ["title", "content", "excerpt", "tags", "image_prompt"]
+        "required": ["title", "category", "content", "excerpt", "tags", "image_prompt"]
     }
 
     payload = {
@@ -173,33 +190,26 @@ def generate_article(keyword, category, internal_posts, user_links):
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "generationConfig": {
             "responseMimeType": "application/json",
-            "responseSchema": response_schema
+            "responseSchema": response_schema,
+            "maxOutputTokens": 8192
         }
     }
     
     for i in range(5):
         try:
-            res = requests.post(url, json=payload, timeout=180)
+            res = requests.post(url, json=payload, timeout=240)
             if res.status_code == 200:
                 raw_response = res.json()['candidates'][0]['content']['parts'][0]['text']
-                
-                # 텍스트 정제 (마크다운 코드 블록 제거 및 제어 문자 처리)
                 json_str = raw_response.strip()
                 if json_str.startswith("```"):
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
-                
-                # 비가시적 제어 문자 제거 (JSON 에러의 주원인)
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
-                
                 data = json.loads(json_str)
-                print("✅ AI 콘텐츠 생성 완료!", flush=True)
+                print(f"✅ AI 콘텐츠 생성 완료! (선택 카테고리: {data.get('category')})", flush=True)
                 return data
             else:
                 print(f"⚠️ API 호출 실패 (HTTP {res.status_code}). 재시도 중... ({i+1}/5)", flush=True)
-            time.sleep(2**i)
-        except json.JSONDecodeError as je:
-            print(f"⚠️ JSON 파싱 오류: {je}. AI 응답을 재검토합니다.", flush=True)
             time.sleep(2**i)
         except Exception as e:
             print(f"⚠️ 오류 발생: {e}. 재시도 중... ({i+1}/5)", flush=True)
@@ -209,32 +219,47 @@ def generate_article(keyword, category, internal_posts, user_links):
 # ==========================================
 # 5. 워드프레스 발행 로직
 # ==========================================
+def get_or_create_term(taxonomy, name, auth):
+    """워드프레스의 카테고리나 태그 ID를 조회하거나 생성"""
+    endpoint = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/{taxonomy}"
+    try:
+        # 검색
+        r = requests.get(f"{endpoint}?search={name}", auth=auth, timeout=10)
+        if r.status_code == 200:
+            terms = r.json()
+            for t in terms:
+                if t['name'].lower() == name.lower():
+                    return t['id']
+        
+        # 생성
+        cr = requests.post(endpoint, auth=auth, json={"name": name}, timeout=10)
+        if cr.status_code == 201:
+            return cr.json()['id']
+    except Exception as e:
+        print(f"⚠️ {taxonomy} 처리 오류 ({name}): {e}", flush=True)
+    return None
+
 def post_article(data, mid):
     print("📢 워드프레스 포스팅 발행 중...", flush=True)
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
+    # 카테고리 처리
+    cat_name = data.get('category', '트렌드')
+    cat_id = get_or_create_term('categories', cat_name, auth)
+    
+    # 태그 처리
     tag_ids = []
     tags_raw = data.get('tags', [])
-    if tags_raw:
-        tag_names = tags_raw if isinstance(tags_raw, list) else [t.strip() for t in str(tags_raw).split(',') if t.strip()]
-        for tname in tag_names:
-            try:
-                r = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags?search={tname}", auth=auth, timeout=10)
-                tid = None
-                if r.status_code == 200:
-                    tags_data = r.json()
-                    tid = next((t['id'] for t in tags_data if t['name'].lower() == tname.lower()), None)
-                if not tid:
-                    cr = requests.post(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/tags", auth=auth, json={"name": tname}, timeout=10)
-                    if cr.status_code == 201: tid = cr.json()['id']
-                if tid: tag_ids.append(tid)
-            except: continue
+    for tname in tags_raw:
+        tid = get_or_create_term('tags', tname, auth)
+        if tid: tag_ids.append(tid)
 
     payload = {
         "title": data.get('title', '제목 없음'), 
         "content": data.get('content', ''), 
         "excerpt": data.get('excerpt', ''),
+        "categories": [cat_id] if cat_id else [],
         "tags": tag_ids, 
         "featured_media": mid, 
         "status": "publish"
@@ -258,6 +283,9 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ GEMINI_API_KEY 누락", flush=True); return
 
+    now = datetime(2026, 2, 14, 11, 4)
+    current_date_str = now.strftime("%Y년 %m월 %d일 %H시 %M분")
+
     if not IS_TEST:
         start_delay = random.randint(0, 3300) 
         print(f"⏳ {start_delay // 60}분 대기 후 시작합니다...", flush=True)
@@ -267,20 +295,21 @@ def main():
     recent_posts = get_recent_posts()
     scraper = TrendScraper()
     
+    # 수집 대상 섹션
     jobs = [
-        ("https://news.naver.com/section/102", "사회"),
-        ("https://news.naver.com/section/105", "IT/과학"),
-        ("https://news.naver.com/breakingnews/section/103/241", "건강정보"),
-        ("https://news.naver.com/breakingnews/section/103/237", "여행/레저"),
-        ("https://news.naver.com/breakingnews/section/103/376", "패션/뷰티"),
-        ("https://news.naver.com/breakingnews/section/103/242", "공연/전시")
+        ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회/생활"),
+        ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/기술"),
+        ("[https://news.naver.com/breakingnews/section/103/241](https://news.naver.com/breakingnews/section/103/241)", "건강정보"),
+        ("[https://news.naver.com/breakingnews/section/103/237](https://news.naver.com/breakingnews/section/103/237)", "여행/레저"),
+        ("[https://news.naver.com/breakingnews/section/103/376](https://news.naver.com/breakingnews/section/103/376)", "패션/뷰티"),
+        ("[https://news.naver.com/breakingnews/section/103/242](https://news.naver.com/breakingnews/section/103/242)", "공연/전시")
     ]
     
     pool = []
-    for url, cat in jobs:
-        print(f"📡 {cat} 뉴스 수집 중...", flush=True)
+    for url, cat_hint in jobs:
+        print(f"📡 {cat_hint} 데이터 수집 중...", flush=True)
         items = scraper.get_naver_news_custom(url)
-        for i in items: pool.append({"kw": i, "cat": cat})
+        for i in items: pool.append({"kw": i, "cat_hint": cat_hint})
     
     if not pool: 
         print("❌ 수집된 데이터가 없습니다.", flush=True)
@@ -290,10 +319,10 @@ def main():
     
     for item in targets:
         print(f"📝 대상 키워드: '{item['kw']}'", flush=True)
-        data = generate_article(item['kw'], item['cat'], recent_posts, user_links)
+        data = generate_article(item['kw'], item['cat_hint'], recent_posts, user_links, current_date_str)
         
         if not data:
-            print("❌ AI 콘텐츠 생성에 실패하여 이번 턴을 종료합니다.", flush=True)
+            print("❌ AI 콘텐츠 생성 실패로 종료합니다.", flush=True)
             continue
         
         mid = None
