@@ -268,12 +268,12 @@ def main():
     scraper = TrendScraper()
     
     jobs = [
-        ("[https://news.naver.com/section/102](https://news.naver.com/section/102)", "사회"),
-        ("[https://news.naver.com/section/105](https://news.naver.com/section/105)", "IT/과학"),
-        ("[https://news.naver.com/breakingnews/section/103/241](https://news.naver.com/breakingnews/section/103/241)", "건강정보"),
-        ("[https://news.naver.com/breakingnews/section/103/237](https://news.naver.com/breakingnews/section/103/237)", "여행/레저"),
-        ("[https://news.naver.com/breakingnews/section/103/376](https://news.naver.com/breakingnews/section/103/376)", "패션/뷰티"),
-        ("[https://news.naver.com/breakingnews/section/103/242](https://news.naver.com/breakingnews/section/103/242)", "공연/전시")
+        ("https://news.naver.com/section/102", "사회"),
+        ("https://news.naver.com/section/105", "IT/과학"),
+        ("https://news.naver.com/breakingnews/section/103/241", "건강정보"),
+        ("https://news.naver.com/breakingnews/section/103/237", "여행/레저"),
+        ("https://news.naver.com/breakingnews/section/103/376", "패션/뷰티"),
+        ("https://news.naver.com/breakingnews/section/103/242", "공연/전시")
     ]
     
     pool = []
