@@ -160,8 +160,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 주요 블록 가이드:
 1. 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
 2. 제목(H2): <!-- wp:heading {{"level":2}} --><h2>소제목</h2><!-- /wp:heading -->
-3. 간격: <!-- wp:spacer {{"height":"40px"}} --><div style="height:40px" aria-hidden="true" class="wp-block-spacer"></div><!-- /wp:spacer -->
-4. 버튼(외부 링크): 
+3. 버튼(외부 링크): 
 <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
 <div class="wp-block-buttons">
   <!-- wp:button {{"className":"is-style-fill"}} -->
@@ -172,7 +171,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 
 [글쓰기 고도화 가이드라인]
 1. 분석적 어조: 데이터와 현상에 기반한 전문가적 시각으로 서술하세요.
-2. 레이아웃: 문단은 4~6줄로 구성하고 섹션 사이에는 반드시 Spacer(40px) 블록을 넣어 여백을 주세요.
+2. 레이아웃: 문단은 4~6줄로 구성하여 데스크탑과 모바일 모두에서 가독성과 시각적 풍성함을 확보하세요.
 3. 소제목 규칙: 숫자나 기호(1., 가.)를 절대 쓰지 말고 오직 텍스트 제목으로만 구성하세요.
 4. 링크 전략: 외부 링크는 버튼 블록으로 삽입하고, 버튼 문구에 '관련사이트:' 같은 말은 생략하세요.
 5. 무결성: 결코 답변을 중간에 끊지 말고 유효한 JSON 형식을 끝까지 완성하여 출력하세요.
