@@ -157,13 +157,13 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
 [이미지 프롬프트 가이드]
 - 인물이 포함될 경우 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요.
 
-[필수 사항: 워드프레스 구텐베르크 블록 형식]
-- 모든 본문 요소는 반드시 구텐베르크 블록 주석으로 감싸야 합니다.
+[필수 사항: 워드프레스 구텐베르크 블록 형식 지침]
+- 모든 본문 요소는 반드시 유효한 구텐베르크 블록 주석으로 감싸야 합니다.
 - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
 - 제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
 - 제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
 - 제목(H4): <!-- wp:heading {{"level":4}} --><h4>제목</h4><!-- /wp:heading -->
-- 버튼(외부 링크용): 
+- 버튼 블록(외부 링크용): 
   <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
   <div class="wp-block-buttons">
     <!-- wp:button {{"className":"is-style-fill"}} -->
@@ -173,7 +173,7 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
   <!-- /wp:buttons -->
 
 [글쓰기 고도화 지침]
-1. 계층적 구조: H2로 대주제를 나누고, H3/H4를 사용하여 세부 정보를 상세히 분석하세요.
+1. 계층적 구조: H2로 대주제를 나누고, H3/H4를 사용하여 세부 정보를 상세히 분석하세요. 구텐베르크 주석 내 JSON 데이터(예: {{"level":3}})를 정확하게 닫으세요.
 2. 서술 방식: 독자에게 정보를 단순히 전달하는 것을 넘어, 인사이트를 제공하는 전문적인 어조를 유지하세요.
 3. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 오직 텍스트로만 구성하세요.
 4. 버튼 활용: 본문 중간이나 섹션 끝에 외부 링크를 '추천 정보' 또는 '관련 사이트'라는 명칭과 함께 버튼 블록으로 삽입하세요.
