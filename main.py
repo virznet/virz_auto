@@ -136,48 +136,49 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
-    internal_ref = "내 블로그 추천글 (필수 2개 이상 포함):\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in selected_int])
+    internal_ref = "내 블로그 추천글 (관련 글로 본문에 포함):\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in selected_int])
     
     selected_ext = random.sample(user_links, min(len(user_links), 2))
-    user_ext_ref = "외부 링크 (필수 2개 이상 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
+    user_ext_ref = "외부 링크 (버튼 형식으로 포함):\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
-    # [수정] 구텐베르크 블록 주석 형식을 더욱 강력하게 규정하고 f-string 충돌 방지
+    # 구텐베르크 블록 고도화 및 f-string 이스케이프 적용
     system_prompt = f"""당신은 전문 SEO 마케터이자 블로거입니다. 
-키워드 '{keyword}'에 대해 매우 깊이 있고 분석적인 블로그 글을 작성하세요. 
+키워드 '{keyword}'에 대해 매우 깊이 있고 분석적인 프리미엄 블로그 글을 작성하세요. 
 
 [현재 시점 정보]
-- 오늘 날짜는 {current_date}입니다. 최신 트렌드를 반영하여 작성하세요.
+- 오늘 날짜는 {current_date}입니다. 최신 시사점과 미래 전망을 포함하세요.
 
-[카테고리 선택]
-- 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시 중 하나를 선택하세요.
+[카테고리 선택 가이드]
+- 트렌드, 건강정보, 여행/레저, 패션/뷰티, 공연/전시 중 키워드와 가장 밀접한 카테고리를 하나 선택하세요.
 
 [이미지 프롬프트 가이드]
-- 인물은 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요.
+- 인물은 기본적으로 'Korean person' 또는 'East Asian'으로 묘사하세요. 
+- 내용이 특정 국가(예: 미국 뉴스 등)에 관한 것이라면 해당 국가/인종에 어울리는 인물로 묘사하세요.
 
-[필수 사항: 워드프레스 구텐베르크(Gutenberg) 블록 표준 준수]
-- 모든 본문 요소는 반드시 유효한 구텐베르크 블록 주석으로 감싸야 합니다. 
-- 주석은 절대로 잘리거나 깨져서는 안 되며, 여는 주석과 닫는 주석을 엄격하게 짝지으세요.
-- **주석 내 JSON 속성(예: {{"level":3}})의 따옴표와 중괄호를 완벽하게 포함하세요.**
-
+[필수 사항: 워드프레스 구텐베르크(Gutenberg) 블록 최적화]
+- 모든 요소는 반드시 유효한 구텐베르크 블록 주석으로 감싸야 합니다. 
+- **주석 내 JSON 구조(예: {{"level":3}})를 완벽하게 유지하세요.**
 - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
-- 대제목(H2): <!-- wp:heading --><h2>제목</h2><!-- /wp:heading -->
-- 중제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
-- 소제목(H4): <!-- wp:heading {{"level":4}} --><h4>제목</h4><!-- /wp:heading -->
-- 버튼 블록: 
+- 제목: <!-- wp:heading {{"level":2}} --><h2>소제목</h2><!-- /wp:heading --> (H2, H3, H4 적절히 활용)
+- 간격: <!-- wp:spacer {{"height":"30px"}} --><div style="height:30px" aria-hidden="true" class="wp-block-spacer"></div><!-- /wp:spacer --> (섹션 사이에 사용)
+- 구분선: <!-- wp:separator --><hr class="wp-block-separator has-alpha-channel-opacity"/><!-- /wp:separator -->
+- 버튼(외부 링크): 
 <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
 <div class="wp-block-buttons">
   <!-- wp:button {{"className":"is-style-fill"}} -->
-  <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">버튼 텍스트</a></div>
+  <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">클릭 유도 문구</a></div>
   <!-- /wp:button -->
 </div>
 <!-- /wp:buttons -->
 
 [글쓰기 고도화 지침]
-1. 계층적 구조: H2로 대주제를 나누고, H3/H4를 사용하여 세부 정보를 상세히 분석하세요. 
-2. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 
-3. 버튼 활용: 외부 링크는 본문 중간이나 하단에 반드시 '버튼 블록' 형식으로 삽입하세요. 버튼 텍스트는 불필요한 수식어를 제거하고 짧고 강력한 액션 문구를 사용하세요.
-4. 가독성: 한 문단은 3~5줄 내외로 구성하세요.
-5. 무결성: JSON 응답이 중간에 끊기지 않도록 끝까지 완성하세요. HTML 엔티티(&lt; 등)를 사용하지 말고 원시 문자(<, >)를 사용하세요.
+1. 분석적 서술: '단순 정보 전달'을 넘어 주제의 배경, 영향력, 해결책을 포함하는 전문적인 기사 형태로 작성하세요.
+2. 가독성 및 호흡: 문단은 3~5줄로 구성하여 데스크탑에서 너무 비어 보이지 않게 하고, 모바일에서도 가독성을 확보하세요. 섹션 사이에 Spacer 블록을 활용해 시각적 여유를 주어야 합니다.
+3. 소제목 규칙: 숫자, 기호, 서수(첫째, 1., 가.)를 절대 사용하지 마세요. 오직 텍스트 제목으로만 구성하세요.
+4. 링크 전략: 
+   - 내부 링크는 본문 중간에 자연스럽게 "함께 읽어보면 좋은 글" 섹션으로 H3와 함께 배치하세요. 
+   - 외부 링크는 섹션이 끝날 때마다 '관련 정보 확인하기' 등의 버튼 블록으로 삽입하세요. 버튼 텍스트에서 '관련 사이트:'와 같은 문구는 삭제하고 자연스럽게 작성하세요.
+5. 무결성: 답변이 끊기지 않도록 끝까지 완성하고 유효한 JSON을 출력하세요.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n수집분류힌트: {category_hint}"
@@ -215,7 +216,6 @@ def generate_article(keyword, category_hint, internal_posts, user_links, current
                     json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
                     json_str = re.sub(r'\s*`{3}$', '', json_str)
                 
-                # 제어 문자 정제
                 json_str = "".join(c for c in json_str if ord(c) >= 32 or c in '\n\r\t')
                 data = json.loads(json_str)
                 print(f"✅ AI 콘텐츠 생성 완료! (카테고리: {data.get('category')})", flush=True)
