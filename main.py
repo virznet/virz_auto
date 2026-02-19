@@ -132,7 +132,8 @@ def upload_to_wp_media(img_data):
 # ==========================================
 def generate_article(keyword, category_hint, internal_posts, user_links, current_date):
     print(f"🤖 Gemini API를 통한 고도화된 콘텐츠 생성 시작...", flush=True)
-    model_id = "gemini-2.5-flash-preview-09-2025"
+    # [변경] 최신 Flash 모델을 가리키는 gemini-flash-latest 적용
+    model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
