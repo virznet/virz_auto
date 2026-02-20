@@ -7,6 +7,7 @@ import base64
 import re
 import io
 import sys
+import xml.etree.ElementTree as ET
 from requests.auth import HTTPBasicAuth
 from PIL import Image
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,14 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
 WP_BASE_URL = os.environ.get('WP_BASE_URL', '').strip() 
+
+# 외부 링크 수집용 RSS 리스트
+RSS_URLS = [
+    "https://virz.net/feed",
+    "https://121913.tistory.com/rss",
+    "https://exciting.tistory.com/rss",
+    "https://sleepyourmoney.net/feed"
+]
 
 # 테스트 모드 설정 (true일 경우 대기 시간 없이 즉시 실행)
 IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
@@ -89,9 +98,10 @@ class VersatileKeywordEngine:
         return {"keyword": f"{seed_topic} 상세 가이드", "category": selected_cat}
 
 # ==========================================
-# 3. 워드프레스 및 이미지 처리
+# 3. 워드프레스 및 이미지 처리 & 링크 수집
 # ==========================================
-def load_external_links():
+def load_external_links_from_json():
+    """links.json 파일에서 외부 링크 목록을 로드"""
     file_path = "links.json"
     default_links = [{"title": "virz.net", "url": "https://virz.net"}]
     if os.path.exists(file_path):
@@ -101,7 +111,36 @@ def load_external_links():
         except: return default_links
     return default_links
 
+def get_rss_links(rss_urls):
+    """지정된 RSS 피드 주소들로부터 최신 글의 제목과 링크를 수집"""
+    rss_links = []
+    print(f"📡 RSS 피드에서 외부 링크 수집 중...", flush=True)
+    for url in rss_urls:
+        try:
+            response = requests.get(url, timeout=15)
+            if response.status_code == 200:
+                # XML 파싱 (RSS 2.0 및 Atom 대응)
+                root = ET.fromstring(response.content)
+                # RSS 2.0 기준 (item > title, link)
+                for item in root.findall(".//item")[:5]: # 피드당 최신 5개만 수집
+                    title = item.find("title").text if item.find("title") is not None else ""
+                    link = item.find("link").text if item.find("link") is not None else ""
+                    if title and link:
+                        rss_links.append({"title": title.strip(), "url": link.strip()})
+                # Atom 기준 (entry > title, link)
+                if not rss_links:
+                    for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry")[:5]:
+                        title = entry.find("{http://www.w3.org/2005/Atom}title").text
+                        link_node = entry.find("{http://www.w3.org/2005/Atom}link")
+                        link = link_node.attrib.get('href') if link_node is not None else ""
+                        if title and link:
+                            rss_links.append({"title": title.strip(), "url": link.strip()})
+        except Exception as e:
+            print(f"⚠️ RSS 수집 실패 ({url}): {e}", flush=True)
+    return rss_links
+
 def get_recent_posts():
+    """워드프레스에서 최근 포스트 목록을 가져와 내부 링크로 활용"""
     try:
         res = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=10&_fields=title,link", timeout=10)
         if res.status_code == 200:
@@ -136,7 +175,7 @@ def upload_to_wp_media(img_data):
 # ==========================================
 # 4. 고도화된 콘텐츠 생성 (구텐베르크 블록 최적화)
 # ==========================================
-def generate_article(target, internal_posts, user_links, current_date):
+def generate_article(target, internal_posts, combined_external_links, current_date):
     """Gemini를 사용하여 구텐베르크 블록 기반의 심층 포스트 생성"""
     keyword = target['keyword']
     category = target['category']
@@ -149,10 +188,10 @@ def generate_article(target, internal_posts, user_links, current_date):
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
     internal_ref_data = "\n".join([f"제목: {p['title']} | 링크: {p['link']}" for p in selected_int])
     
-    selected_ext = random.sample(user_links, min(len(user_links), 2))
+    # JSON 링크와 RSS 링크가 섞인 리스트에서 랜덤하게 선택
+    selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
     external_ref_data = "\n".join([f"제목: {l['title']} | 링크: {l['url']}" for l in selected_ext])
 
-    # 구텐베르크 블록 형식을 강제하기 위한 시스템 프롬프트
     system_prompt = f"""당신은 {category} 분야의 전문 에디터입니다. 
 키워드 '{keyword}'에 대해 워드프레스 구텐베르크 블록 에디터(Gutenberg Block Editor) 방식에 완전히 최적화된 심층 블로그 글을 작성하세요.
 
@@ -179,7 +218,7 @@ def generate_article(target, internal_posts, user_links, current_date):
 
 [링크 삽입 규칙]
 1. 내부 링크: '내 블로그 추천글' 정보를 사용하여 본문 중간에 리스트 블록으로 삽입하세요.
-2. 외부 링크: '외부 참조 링크'는 본문 하단에 버튼 블록으로 삽입하세요.
+2. 외부 링크: '외부 참조 링크' 정보를 본문 중간 혹은 하단에 버튼 블록으로 삽입하세요. (링크 주소를 절대로 수정하지 마세요)
 
 [기타 지침]
 - 연도 및 날짜 정보를 일절 포함하지 마세요.
@@ -300,19 +339,27 @@ def main():
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
-    user_links = load_external_links()
+    # 1. 고정 외부 링크(links.json) + 동적 RSS 링크 수집
+    json_links = load_external_links_from_json()
+    rss_links = get_rss_links(RSS_URLS)
+    combined_external_links = json_links + rss_links
+    
+    # 2. 내부 최근 포스트 로드
     recent_posts = get_recent_posts()
     
-    data = generate_article(target, recent_posts, user_links, current_date_str)
+    # 3. AI 글 생성 (수집된 전체 링크 중 무작위 선택하여 AI에게 전달)
+    data = generate_article(target, recent_posts, combined_external_links, current_date_str)
     if not data: 
         print("❌ 콘텐츠 생성 단계에서 실패했습니다.")
         return
     
+    # 4. 이미지 생성 및 업로드
     mid = None
     if data.get('image_prompt'):
         img_data = generate_image_process(data['image_prompt'])
         if img_data: mid = upload_to_wp_media(img_data)
     
+    # 5. 워드프레스 최종 발행
     post_article(data, mid)
 
 if __name__ == "__main__":
