@@ -1,386 +1,347 @@
-import os
-import random
-import time
 import requests
 import json
+import time
 import base64
 import re
+import os
 import io
+import random
 import sys
 import xml.etree.ElementTree as ET
-from requests.auth import HTTPBasicAuth
-from PIL import Image
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-# 콘솔 출력 시 한글 깨짐 방지 설정
-if sys.stdout.encoding != 'utf-8':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        pass
+# 이미지 처리를 위한 PIL 라이브러리 (JPG 변환 및 압축용)
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    print("⚠️ 경고: PIL(Pillow) 라이브러리가 설치되지 않았습니다. 'pip install Pillow'가 필요합니다.")
 
-# ==========================================
-# 1. 환경 변수 및 설정
-# ==========================================
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
-WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
-WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
-WP_BASE_URL = os.environ.get('WP_BASE_URL', '').strip() 
+# ==============================================================================
+# 환경 변수 설정
+# ==============================================================================
+CONFIG = {
+    "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY", ""),
+    "WP_URL": os.environ.get("WP_URL", "").rstrip("/"),
+    "WP_USERNAME": os.environ.get("WP_USERNAME", "admin"),
+    "WP_APP_PASSWORD": os.environ.get("WP_APP_PASSWORD", ""),
+    "TEXT_MODEL": "gemini-flash-latest", 
+    "IMAGE_MODEL": "imagen-4.0-generate-001",
+    "NAVER_CLIENT_ID": os.environ.get("NAVER_CLIENT_ID", ""),
+    "NAVER_CLIENT_SECRET": os.environ.get("NAVER_CLIENT_SECRET", ""),
+    # 외부 링크 수집용 RSS 리스트 (요청하신 네이버 블로그 피드 추가)
+    "RSS_URLS": [
+        "https://virz.net/feed",
+        "https://121913.tistory.com/rss",
+        "https://exciting.tistory.com/rss",
+        "https://sleepyourmoney.net/feed",
+        "https://rss.blog.naver.com/moviepotal.xml"
+    ]
+}
 
-# 외부 링크 수집용 RSS 리스트
-RSS_URLS = [
-    "https://virz.net/feed",
-    "https://121913.tistory.com/rss",
-    "https://exciting.tistory.com/rss",
-    "https://sleepyourmoney.net/feed"
-]
-
-# 테스트 모드 설정 (true일 경우 대기 시간 없이 즉시 실행)
-IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
-
-# ==========================================
-# 2. 다분야 롱테일 키워드 생성 엔진
-# ==========================================
-class VersatileKeywordEngine:
-    """건강, 복지, 생활정보 분야의 롱테일 키워드를 무작위로 생성하는 엔진"""
-    def __init__(self, api_key):
-        self.api_key = api_key
-        self.model = "gemini-flash-latest"
-        self.categories = {
-            "건강정보": [
-                "만성 질환 예방 및 식단 관리", "연령대별 필수 영양제 가이드", 
-                "심리 상담 및 스트레스 해소법", "집에서 하는 재활 운동 및 스트레칭",
-                "수면 장애 극복 및 숙면 팁"
-            ],
-            "복지정보": [
-                "정부 지원금 및 바우처 신청 자격", "노인 및 시니어 복지 혜택 정리",
-                "청년 및 신혼부부 주거 지원 정책", "육아 휴직 및 아동 수당 활용법",
-                "장애인 편의 시설 및 고용 지원"
-            ],
-            "생활정보": [
-                "절세를 위한 세무 상식 및 연말정산", "일상 속 법률 상식 및 계약 주의사항",
-                "친환경 살림 팁 및 청소 노하우", "가계부 정리 및 스마트한 저축 방법",
-                "제철 식재료 보관 및 요리 비법"
-            ]
-        }
-
-    def generate_target(self, current_date):
-        """현재 시점을 인지하되, 제목과 키워드에서 연도를 배제함"""
-        selected_cat = random.choice(list(self.categories.keys()))
-        seed_topic = random.choice(self.categories[selected_cat])
+class WordPressAutoPoster:
+    def __init__(self):
+        self._validate_config()
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        user_pass = f"{CONFIG['WP_USERNAME']}:{CONFIG['WP_APP_PASSWORD']}"
+        self.auth = base64.b64encode(user_pass.encode()).decode()
+        self.headers = {"Authorization": f"Basic {self.auth}"}
         
-        prompt = f"""당신은 SEO 전문가입니다. 오늘 날짜는 {current_date}입니다.
-분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 현재 시점에 가장 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 멀티 피드 시스템 초기화 및 수집 시작...")
+        
+        # 1. 외부 사이트 RSS 동기화
+        self.sync_multiple_rss_feeds()
+        
+        # 2. 통합된 링크 데이터 로드
+        self.ext_links = self.load_external_links(2)
+        self.int_links = self.fetch_internal_links(2)
+        
+        # 3. 링크 마커 맵 생성
+        self.link_map = {}
+        self._setup_link_markers()
 
-[지침]
-1. 검색 의도가 명확하고 정보가 풍부한 주제를 선정하세요.
-2. 생성되는 키워드에 연도(2026년 등)나 특정 날짜 정보를 절대로 포함하지 마세요.
-3. 결과는 반드시 JSON 형식으로만 응답하세요.
-{{
-  "keyword": "연도 정보가 없는 구체적인 롱테일 키워드 문구",
-  "category": "{selected_cat}"
-}}"""
+    def _validate_config(self):
+        required_keys = ["WP_URL", "GEMINI_API_KEY", "WP_APP_PASSWORD"]
+        for key in required_keys:
+            if not CONFIG.get(key):
+                print(f"❌ 오류: {key} 환경 변수가 설정되지 않았습니다.")
+                sys.exit(1)
 
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json"}
-        }
+    def sync_multiple_rss_feeds(self):
+        """설정된 모든 RSS 피드에서 새로운 외부 링크를 수집합니다."""
+        print(f"📡 총 {len(CONFIG['RSS_URLS'])}개의 외부 RSS 피드 동기화 중...")
+        existing_links = []
+        if os.path.exists('links.json'):
+            with open('links.json', 'r', encoding='utf-8') as f:
+                try: existing_links = json.load(f)
+                except: existing_links = []
+        
+        existing_urls = {link['url'] for link in existing_links}
+        total_added = 0
+
+        for rss_url in CONFIG['RSS_URLS']:
+            print(f"🔗 수집 대상: {rss_url}")
+            try:
+                res = requests.get(rss_url, timeout=20)
+                if res.status_code != 200:
+                    print(f"  ⚠️ 접속 실패 (코드: {res.status_code})")
+                    continue
+                root = ET.fromstring(res.content)
+                feed_added = 0
+                
+                # 티스토리/워드프레스(item) 및 일반 RSS 구조 대응
+                items = root.findall('.//item')
+                for item in items:
+                    title_elem = item.find('title')
+                    link_elem = item.find('link')
+                    if title_elem is not None and link_elem is not None:
+                        title = title_elem.text.strip()
+                        link = link_elem.text.strip()
+                        if link not in existing_urls:
+                            existing_links.append({"title": title, "url": link})
+                            existing_urls.add(link)
+                            feed_added += 1
+                            total_added += 1
+                if feed_added > 0:
+                    print(f"  ✅ {feed_added}개의 새로운 링크를 발견했습니다.")
+            except Exception as e:
+                print(f"  ⚠️ 처리 중 오류: {e}")
+
+        if total_added > 0:
+            with open('links.json', 'w', encoding='utf-8') as f:
+                json.dump(existing_links, f, ensure_ascii=False, indent=4)
+            print(f"🎉 동기화 완료: 총 {total_added}개의 링크가 links.json에 추가되었습니다.")
+
+    def fetch_internal_links(self, count=2):
+        url = f"{CONFIG['WP_URL']}/wp-json/wp/v2/posts"
+        params = {"per_page": 15, "status": "publish", "_fields": "title,link"}
         try:
-            res = requests.post(url, json=payload, timeout=30)
+            res = requests.get(url, headers=self.headers, params=params, timeout=20)
             if res.status_code == 200:
-                text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                return json.loads(text)
+                posts = res.json()
+                sampled = random.sample(posts, min(len(posts), count))
+                return [{"title": re.sub('<.*?>', '', p['title']['rendered']).strip(), "url": p['link'].strip()} for p in sampled]
         except Exception as e:
-            print(f"⚠️ 키워드 생성 실패: {e}")
+            print(f"⚠️ 내부 링크 호출 실패: {e}")
+        return []
+
+    def load_external_links(self, count=2):
+        try:
+            if os.path.exists('links.json'):
+                with open('links.json', 'r', encoding='utf-8') as f:
+                    links = json.load(f)
+                    if not links: return []
+                    return random.sample(links, min(len(links), count))
+        except: pass
+        return []
+
+    def _setup_link_markers(self):
+        for i, link in enumerate(self.int_links):
+            self.link_map[f"[[내부참고_{i}]]"] = link
+        for i, link in enumerate(self.ext_links):
+            self.link_map[f"[[외부추천_{i}]]"] = link
+
+    def inject_smart_links(self, content):
+        """마커를 분석하여 앵커 또는 버튼으로 정밀 치환 (내부/외부 통합 관리)"""
+        for marker, info in self.link_map.items():
+            url = info['url']
+            title = info['title']
+            
+            button_html = (
+                f'\n<!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->\n'
+                f'<div class="wp-block-buttons"><!-- wp:button {{"backgroundColor":"vivid-cyan-blue","borderRadius":5}} -->\n'
+                f'<div class="wp-block-button"><a class="wp-block-button__link has-vivid-cyan-blue-background-color has-background wp-element-button" href="{url}" target="_self">{title}</a></div>\n'
+                f'<!-- /wp:button --></div>\n<!-- /wp:buttons -->\n'
+            )
+            anchor_html = f'<a href="{url}" target="_self"><strong>{title}</strong></a>'
+            standalone_regex = rf'<!-- wp:paragraph -->\s*<p>\s*{re.escape(marker)}\s*</p>\s*<!-- /wp:paragraph -->'
+            
+            if re.search(standalone_regex, content):
+                content = re.sub(standalone_regex, button_html, content)
+            else:
+                content = content.replace(marker, anchor_html)
+        return content
+
+    def clean_structure(self, content):
+        if not content: return ""
+        content = re.sub(r'//\s*[a-zA-Z가-힣]+', '', content)
+        content = content.replace('```html', '').replace('```', '')
+        blocks = re.split(r'(<!-- wp:[^>]+-->)', content)
+        seen_fingerprints = set()
+        refined_output = []
+        for i in range(len(blocks)):
+            segment = blocks[i]
+            if segment.startswith('<!-- wp:') or segment.startswith('<!-- /wp:'):
+                refined_output.append(segment)
+                continue
+            text_only = re.sub(r'<[^>]+>', '', segment).strip()
+            if len(text_only) > 15:
+                fingerprint = re.sub(r'[^가-힣]', '', text_only)[:80]
+                if fingerprint in seen_fingerprints:
+                    if refined_output and refined_output[-1].startswith('<!-- wp:'): refined_output.pop()
+                    continue
+                seen_fingerprints.add(fingerprint)
+            refined_output.append(segment)
+        return "".join(refined_output).strip()
+
+    def generate_image(self, title, excerpt):
+        """본문 내용과 맥락에 맞춰 한국인 인물 및 배경 이미지를 생성합니다."""
+        print(f"🎨 이미지 다변화 생성 중 (한국인 피사체 강조)...")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{CONFIG['IMAGE_MODEL']}:predict?key={CONFIG['GEMINI_API_KEY']}"
         
-        return {"keyword": f"{seed_topic} 상세 가이드", "category": selected_cat}
-
-# ==========================================
-# 3. 워드프레스 및 이미지 처리 & 링크 수집
-# ==========================================
-def get_rss_links(rss_urls):
-    """지정된 RSS 피드 주소들로부터 최신 글의 제목과 링크를 수집 (정규표현식 보조 파싱)"""
-    rss_links = []
-    print(f"📡 RSS 피드에서 외부 링크 수집 중...", flush=True)
-    for url in rss_urls:
+        scenarios = [
+            f"A professional South Korean financial advisor explaining pension documents to a middle-aged South Korean couple in a sunlit modern Seoul office.",
+            f"A confident South Korean man in his 50s smiling while reviewing retirement plans on a tablet in a modern Korean cafe.",
+            f"Close-up of a South Korean senior's hands holding a detailed South Korean National Pension report and glasses.",
+            f"A happy elderly South Korean couple in their 70s walking together in a beautiful scenic Korean park during autumn."
+        ]
+        
+        selected_scenario = random.choice(scenarios)
+        image_prompt = (
+            f"High-end editorial photography for a finance column. "
+            f"Concept: {selected_scenario} Context: {title}. "
+            f"Visual Style: Photorealistic, cinematic lighting, 16:9 aspect ratio. "
+            f"CRITICAL: NO TEXT, NO LETTERS, NO WORDS in the image."
+        )
+        
+        payload = {"instances": [{"prompt": image_prompt}], "parameters": {"sampleCount": 1}}
         try:
-            response = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
-            if response.status_code == 200:
-                content = response.text
-                
-                # ElementTree 파싱 시도
-                try:
-                    # XML 선언 뒤의 부적절한 문자 제거 시도
-                    content_clean = re.sub(r'^[^\<]*', '', content) 
-                    root = ET.fromstring(content_clean.encode('utf-8'))
-                    
-                    for item in root.findall(".//item")[:5]:
-                        title = item.find("title").text if item.find("title") is not None else ""
-                        link = item.find("link").text if item.find("link") is not None else ""
-                        if title and link:
-                            rss_links.append({"title": title.strip(), "url": link.strip()})
-                except ET.ParseError:
-                    # ElementTree 실패 시 정규표현식으로 제목과 링크 추출 (강제 복구)
-                    items = re.findall(r'<item>(.*?)</item>', content, re.DOTALL)
-                    for item in items[:5]:
-                        title_match = re.search(r'<title>(.*?)</title>', item, re.DOTALL)
-                        link_match = re.search(r'<link>(.*?)</link>', item, re.DOTALL)
-                        if title_match and link_match:
-                            title = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', title_match.group(1)).strip()
-                            link = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', link_match.group(1)).strip()
-                            rss_links.append({"title": title, "url": link})
-        except Exception as e:
-            print(f"⚠️ RSS 수집 실패 ({url}): {e}", flush=True)
-    return rss_links
+            res = requests.post(url, json=payload, timeout=120)
+            if res.status_code == 200: return res.json()['predictions'][0]['bytesBase64Encoded']
+        except: pass
+        return None
 
-def load_external_links_from_json():
-    file_path = "links.json"
-    default_links = [{"title": "virz.net", "url": "https://virz.net"}]
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except: return default_links
-    return default_links
-
-def get_recent_posts():
-    try:
-        res = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=10&_fields=title,link", timeout=10)
-        if res.status_code == 200:
-            return [{"title": p['title']['rendered'], "link": p['link']} for p in res.json()]
-    except: return []
-
-def generate_image_process(prompt):
-    """이미지 생성 후 JPG 70% 품질로 변환 및 최적화"""
-    print(f"🎨 이미지 생성 중... (주제: {prompt[:30]}...)")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
-    final_prompt = f"High-quality commercial photography for: {prompt}. Professional lighting, clean composition. NO TEXT."
-    payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
-    try:
-        response = requests.post(url, json=payload, timeout=150)
-        if response.status_code == 200:
-            result = response.json()
-            if 'predictions' in result:
-                b64_data = result['predictions'][0]['bytesBase64Encoded']
-                raw_bytes = base64.b64decode(b64_data)
-                
-                # 이미지 변환 로직 (JPG 70% 품질)
-                img = Image.open(io.BytesIO(raw_bytes))
-                
-                # RGBA(투명도 포함)인 경우 RGB로 변환하여 JPG 저장 가능하게 처리
+    def process_and_upload_image(self, b64_data, title):
+        """이미지를 JPG 70% 품질로 변환 및 최적화하여 업로드합니다."""
+        if not b64_data: return None
+        
+        print("📤 이미지 JPG 변환 및 최적화 업로드 중...")
+        raw_data = base64.b64decode(b64_data)
+        
+        if PIL_AVAILABLE:
+            try:
+                img = Image.open(io.BytesIO(raw_data))
                 if img.mode in ("RGBA", "P"):
                     img = img.convert("RGB")
-                
-                output_buffer = io.BytesIO()
-                img.save(output_buffer, format="JPEG", quality=70, optimize=True)
-                return output_buffer.getvalue()
-    except Exception as e:
-        print(f"⚠️ 이미지 생성 또는 변환 실패: {e}")
-    return None
+                output = io.BytesIO()
+                img.save(output, format="JPEG", quality=70, optimize=True)
+                final_data = output.getvalue()
+                print("✅ JPG 70% 압축 완료")
+            except Exception as e:
+                print(f"⚠️ 이미지 최적화 실패: {e}")
+                final_data = raw_data
+        else:
+            final_data = raw_data
 
-def upload_to_wp_media(img_data):
-    url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media"
-    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.jpg", "Content-Type": "image/jpeg"}
-    try:
-        res = requests.post(url, auth=auth, headers=headers, data=img_data, timeout=60)
-        if res.status_code == 201: return res.json()['id']
-    except: pass
-    return None
+        files = {'file': (f"nps_pro_{int(time.time())}.jpg", final_data, "image/jpeg")}
+        media_res = requests.post(f"{CONFIG['WP_URL']}/wp-json/wp/v2/media", headers=self.headers, files=files, timeout=60)
+        
+        if media_res.status_code == 201:
+            return media_res.json().get('id')
+        return None
 
-# ==========================================
-# 4. 고도화된 콘텐츠 생성 (안정성 강화)
-# ==========================================
-def generate_article(target, internal_posts, combined_external_links, current_date):
-    """Gemini를 사용하여 구텐베르크 블록 기반의 심층 포스트 생성 (토큰 상향 및 안정성 강화)"""
-    keyword = target['keyword']
-    category = target['category']
-    
-    print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}")
-    
-    model_id = "gemini-flash-latest"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
-    
-    selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
-    internal_ref_data = "\n".join([f"제목: {p['title']} | 링크: {p['link']}" for p in selected_int])
-    
-    selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
-    external_ref_data = "\n".join([f"제목: {l['title']} | 링크: {l['url']}" for l in selected_ext])
+    def get_longtail_keyword(self):
+        """실시간 롱테일 키워드 발굴 로직"""
+        print(f"🔍 실시간 롱테일 키워드 분석 중...")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{CONFIG['TEXT_MODEL']}:generateContent?key={CONFIG['GEMINI_API_KEY']}"
+        prompt = "대한민국 국민연금과 관련하여 2026년 기준 사람들이 가장 궁금해할 구체적인 롱테일 키워드를 하나 선정해 주제만 짧게 답해줘."
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        try:
+            res = requests.post(url, json=payload, timeout=30)
+            if res.status_code == 200: return res.json()['candidates'][0]['content']['parts'][0]['text'].strip().replace('"', '')
+        except: pass
+        return "국민연금 수령액 늘리는 실전 전략"
 
-    system_prompt = f"""당신은 {category} 분야의 전문 에디터입니다. 
-키워드 '{keyword}'에 대해 워드프레스 구텐베르크 블록 에디터 방식에 최적화된 블로그 글을 작성하세요.
+    def call_gemini_with_search(self, target_topic):
+        """Google Search Grounding 기반 심층 본문 및 지능형 제목 생성"""
+        print(f"🤖 구글 검색 기반 심층 콘텐츠 생성 중 (3,000자 목표)...")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{CONFIG['TEXT_MODEL']}:generateContent?key={CONFIG['GEMINI_API_KEY']}"
+        marker_desc = "\n".join([f"- {k}: {v['title']}" for k, v in self.link_map.items()])
+        
+        system_instruction = f"""당신은 대한민국 최고의 금융 자산관리 전문가입니다. 실시간 데이터를 바탕으로 독자의 의도를 완벽히 해결하는 3,000자 초장문 전문가 칼럼을 작성하세요.
 
-[필수 요구사항 - 분량 및 토큰]
-- 목표 분량: 공백 제외 2,500자 ~ 3,000자 내외.
-- **매우 중요**: 글이 중간에 끊기지 않도록 끝까지 완결된 JSON 구조를 출력하세요. 
+[⚠️ 제목 작성 규칙]
+1. 제목 맨 앞에 '2026년'이나 '2월'을 절대 배치하지 마세요. 
+2. 연도(2026년) 문구는 문맥적으로 자연스럽고 독자의 신뢰를 높이는 데 필요할 때만 선택적으로 포함하세요.
 
-[구텐베르크 블록 형식]
-- 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
-- 제목(H2): <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
-- 리스트: <!-- wp:list --><ul><li>항목</li></ul><!-- /wp:list -->
-- 버튼: <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
-     <div class="wp-block-buttons">
-       <!-- wp:button {{"className":"is-style-fill"}} -->
-       <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">텍스트</a></div>
-       <!-- /wp:button -->
-     </div>
-     <!-- /wp:buttons -->
+[⚠️ 하이퍼링크 마커 삽입 규칙]
+1. 아래 제공된 마커들({list(self.link_map.keys())})만 본문에 삽입하세요.
+{marker_desc}
+2. 마커 옆의 제목 설명을 본문에 같이 적지 마세요. 본문에는 오직 '[[외부추천_0]]'과 같은 마커 코드만 들어가야 합니다.
 
-[가독성]
-- 한 문단은 2~3문장 이내로 짧게 구성하세요.
-- 핵심 키워드는 <strong> 태그로 볼드 처리하세요.
+[⚠️ 구텐베르크 블록 표준] 모든 본문 요소는 반드시 wp:paragraph, wp:heading h2/h3, wp:list, wp:table 마커로 감싸세요.
+[⚠️ 분량] 공백 포함 2,500자~3,000자의 압도적인 정보량을 제공하세요."""
 
-[기타]
-- 연도 및 날짜를 포함하지 마세요.
-- 반드시 유효한 JSON 형식으로 응답하세요. 본문 내 큰따옴표는 반드시 백슬래시로 이스케이프(\") 하세요.
-"""
-    
-    user_query = f"""
-[내 블로그 추천글 리스트]
-{internal_ref_data}
-
-[외부 참조 링크 리스트]
-{external_ref_data}
-
-대상 키워드: {keyword}
-카테고리: {category}
-"""
-    
-    response_schema = {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string"},
-            "category": {"type": "string"},
-            "content": {"type": "string"},
-            "excerpt": {"type": "string"},
-            "tags": {"type": "array", "items": {"type": "string"}},
-            "image_prompt": {"type": "string"}
-        },
-        "required": ["title", "category", "content", "excerpt", "tags", "image_prompt"]
-    }
-
-    payload = {
-        "contents": [{"parts": [{"text": user_query}]}],
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "tools": [{"google_search": {}}], 
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-            "maxOutputTokens": 8192 # [수정] 장문 생성을 위해 토큰 제한을 대폭 상향
+        payload = {
+            "contents": [{"parts": [{"text": f"선정된 주제: '{target_topic}'\n\n이 주제에 대해 구글 검색을 통해 심층 분석하여 완성도 높은 구텐베르크 칼럼을 작성해줘."}]}],
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "tools": [{"google_search": {}}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": 0.7,
+                "maxOutputTokens": 8192,
+                "responseSchema": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "content": {"type": "string"},
+                        "excerpt": {"type": "string"},
+                        "tags": {"type": "string"}
+                    },
+                    "required": ["title", "content", "excerpt", "tags"]
+                }
+            }
         }
-    }
-    
-    for i in range(5):
         try:
             res = requests.post(url, json=payload, timeout=300)
-            if res.status_code == 200:
-                raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                
-                # [안정성] JSON 파싱 전 불필요한 마크다운 코드 블록 기호 제거 및 정제
-                json_str = raw_text.strip()
-                if json_str.startswith("```"):
-                    json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
-                    json_str = re.sub(r'\s*`{3}$', '', json_str)
-                
-                # 구글 검색 인용 마커 제거
-                json_str = re.sub(r'\[\d+\]', '', json_str)
-                
-                return json.loads(json_str)
-            else:
-                print(f"⚠️ API 오류 (HTTP {res.status_code}): {res.text}")
-            time.sleep(2**i)
-        except Exception as e:
-            print(f"⚠️ 생성 실패 (시도 {i+1}/5): {e}")
-            time.sleep(2**i)
-    return None
+            if res.status_code == 200: return json.loads(res.json()['candidates'][0]['content']['parts'][0]['text'])
+        except: pass
+        return None
 
-# ==========================================
-# 5. 워드프레스 발행 로직
-# ==========================================
-def get_or_create_term(taxonomy, name, auth):
-    endpoint = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/{taxonomy}"
-    try:
-        r = requests.get(f"{endpoint}?search={name}", auth=auth, timeout=10)
-        if r.status_code == 200 and r.json():
-            for t in r.json():
-                if t['name'].lower() == name.lower(): return t['id']
-        cr = requests.post(endpoint, auth=auth, json={"name": name}, timeout=10)
-        if cr.status_code == 201: return cr.json()['id']
-    except: pass
-    return None
+    def get_or_create_tags(self, tags_str):
+        if not tags_str: return []
+        tag_ids = []
+        for name in [t.strip() for t in tags_str.split(',')]:
+            try:
+                res = requests.post(f"{CONFIG['WP_URL']}/wp-json/wp/v2/tags", headers=self.headers, json={"name": name}, timeout=15)
+                if res.status_code in [200, 201]: tag_ids.append(res.json()['id'])
+                else:
+                    search = requests.get(f"{CONFIG['WP_URL']}/wp-json/wp/v2/tags?search={name}", headers=self.headers, timeout=15)
+                    if search.status_code == 200 and search.json(): tag_ids.append(search.json()[0]['id'])
+            except: continue
+        return tag_ids
 
-def post_article(data, mid):
-    print("📢 워드프레스 발행 시도 중...")
-    url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
-    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    
-    cat_id = get_or_create_term('categories', data.get('category', '생활정보'), auth)
-    tag_ids = [get_or_create_term('tags', t, auth) for t in data.get('tags', []) if t]
-    tag_ids = [tid for tid in tag_ids if tid]
-
-    payload = {
-        "title": data.get('title', '정보 안내'), 
-        "content": data.get('content', ''), 
-        "excerpt": data.get('excerpt', ''),
-        "categories": [cat_id] if cat_id else [],
-        "tags": tag_ids, 
-        "featured_media": mid, 
-        "status": "publish"
-    }
-    
-    try:
-        res = requests.post(url, auth=auth, json=payload, timeout=60)
-        if res.status_code == 201:
-            print(f"🚀 발행 성공: {res.json().get('link')}")
-            return True
-        else:
-            print(f"❌ 발행 실패 (HTTP {res.status_code}): {res.text}")
-    except Exception as e:
-        print(f"❌ 발행 중 예외 발생: {e}")
-    return False
-
-# ==========================================
-# 6. 메인 실행부
-# ==========================================
-def main():
-    if not GEMINI_API_KEY: 
-        print("❌ API 키 누락"); return
-
-    kst = timezone(timedelta(hours=9))
-    current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
-
-    if not IS_TEST:
-        delay = random.randint(0, 3300)
-        print(f"⏳ {delay // 60}분 랜덤 대기...")
-        time.sleep(delay)
-
-    engine = VersatileKeywordEngine(GEMINI_API_KEY)
-    target = engine.generate_target(current_date_str)
-    
-    # 1. 고정 외부 링크 + 동적 RSS 링크 수집
-    json_links = load_external_links_from_json()
-    rss_links = get_rss_links(RSS_URLS)
-    combined_external_links = json_links + rss_links
-    
-    # 2. 내부 최근 포스트 로드
-    recent_posts = get_recent_posts()
-    
-    # 3. AI 글 생성
-    data = generate_article(target, recent_posts, combined_external_links, current_date_str)
-    if not data: 
-        print("❌ 콘텐츠 생성 단계에서 실패했습니다.")
-        return
-    
-    # 4. 이미지 생성 및 업로드
-    mid = None
-    if data.get('image_prompt'):
-        img_data = generate_image_process(data['image_prompt'])
-        if img_data: mid = upload_to_wp_media(img_data)
-    
-    # 5. 워드프레스 최종 발행
-    post_article(data, mid)
+    def run(self):
+        print(f"--- [{datetime.now().strftime('%H:%M:%S')}] 멀티 피드 및 이미지 최적화 포스팅 시작 ---")
+        target_topic = self.get_longtail_keyword()
+        post_data = self.call_gemini_with_search(target_topic)
+        if not post_data: return
+        
+        content = self.clean_structure(post_data['content'])
+        content = self.inject_smart_links(content)
+        
+        # 이미지 생성 및 JPG 70% 최적화 업로드
+        img_id = None
+        img_b64 = self.generate_image(post_data['title'], post_data['excerpt'])
+        if img_b64:
+            img_id = self.process_and_upload_image(img_b64, post_data['title'])
+        
+        tag_ids = self.get_or_create_tags(post_data.get('tags', ''))
+        
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 워드프레스 발행 요청 중...")
+        payload = {
+            "title": post_data['title'],
+            "content": content,
+            "excerpt": post_data['excerpt'],
+            "status": "publish",
+            "featured_media": img_id if img_id else 0,
+            "tags": tag_ids
+        }
+        res = requests.post(f"{CONFIG['WP_URL']}/wp-json/wp/v2/posts", headers={"Authorization": f"Basic {self.auth}", "Content-Type": "application/json"}, json=payload, timeout=60)
+        
+        if res.status_code == 201: print(f"🎉 성공: {post_data['title']}")
+        else: print(f"❌ 실패: {res.text}")
 
 if __name__ == "__main__":
-    main()
+    WordPressAutoPoster().run()
