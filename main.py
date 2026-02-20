@@ -153,6 +153,7 @@ def get_recent_posts():
     except: return []
 
 def generate_image_process(prompt):
+    """이미지 생성 후 JPG 70% 품질로 변환 및 최적화"""
     print(f"🎨 이미지 생성 중... (주제: {prompt[:30]}...)")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
     final_prompt = f"High-quality commercial photography for: {prompt}. Professional lighting, clean composition. NO TEXT."
@@ -163,8 +164,20 @@ def generate_image_process(prompt):
             result = response.json()
             if 'predictions' in result:
                 b64_data = result['predictions'][0]['bytesBase64Encoded']
-                return base64.b64decode(b64_data)
-    except: pass
+                raw_bytes = base64.b64decode(b64_data)
+                
+                # 이미지 변환 로직 (JPG 70% 품질)
+                img = Image.open(io.BytesIO(raw_bytes))
+                
+                # RGBA(투명도 포함)인 경우 RGB로 변환하여 JPG 저장 가능하게 처리
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                
+                output_buffer = io.BytesIO()
+                img.save(output_buffer, format="JPEG", quality=70, optimize=True)
+                return output_buffer.getvalue()
+    except Exception as e:
+        print(f"⚠️ 이미지 생성 또는 변환 실패: {e}")
     return None
 
 def upload_to_wp_media(img_data):
