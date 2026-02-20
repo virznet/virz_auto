@@ -62,13 +62,12 @@ class VersatileKeywordEngine:
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         
-        # 키워드 생성 시 연도 포함 금지 지침 강화
         prompt = f"""당신은 SEO 전문가입니다. 오늘 날짜는 {current_date}입니다.
 분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 현재 시점에 가장 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
 
 [지침]
 1. 검색 의도가 명확하고 정보가 풍부한 주제를 선정하세요.
-2. 생성되는 키워드에 '2026년'이나 특정 날짜 정보를 절대로 포함하지 마세요.
+2. 생성되는 키워드에 연도(2026년 등)나 특정 날짜 정보를 절대로 포함하지 마세요.
 3. 결과는 반드시 JSON 형식으로만 응답하세요.
 {{
   "keyword": "연도 정보가 없는 구체적인 롱테일 키워드 문구",
@@ -93,7 +92,6 @@ class VersatileKeywordEngine:
 # 3. 워드프레스 및 이미지 처리
 # ==========================================
 def load_external_links():
-    """links.json 파일에서 외부 링크 목록을 로드"""
     file_path = "links.json"
     default_links = [{"title": "virz.net", "url": "https://virz.net"}]
     if os.path.exists(file_path):
@@ -104,7 +102,6 @@ def load_external_links():
     return default_links
 
 def get_recent_posts():
-    """워드프레스에서 최근 포스트 목록을 가져와 내부 링크로 활용"""
     try:
         res = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=10&_fields=title,link", timeout=10)
         if res.status_code == 200:
@@ -112,7 +109,6 @@ def get_recent_posts():
     except: return []
 
 def generate_image_process(prompt):
-    """Imagen 모델을 사용하여 포스팅용 이미지를 생성"""
     print(f"🎨 이미지 생성 중... (주제: {prompt[:30]}...)")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
     final_prompt = f"High-quality commercial photography for: {prompt}. Professional lighting, clean composition. NO TEXT."
@@ -123,12 +119,11 @@ def generate_image_process(prompt):
             result = response.json()
             if 'predictions' in result:
                 b64_data = result['predictions'][0]['bytesBase64Encoded']
-                return base64.decodebytes(b64_data.encode())
+                return base64.b64decode(b64_data)
     except: pass
     return None
 
 def upload_to_wp_media(img_data):
-    """생성된 이미지를 워드프레스 미디어 라이브러리에 업로드"""
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.jpg", "Content-Type": "image/jpeg"}
@@ -139,10 +134,10 @@ def upload_to_wp_media(img_data):
     return None
 
 # ==========================================
-# 4. 고도화된 콘텐츠 생성 (안정성 및 메모리 최적화)
+# 4. 고도화된 콘텐츠 생성 (가독성 및 레이아웃 최적화)
 # ==========================================
 def generate_article(target, internal_posts, user_links, current_date):
-    """Gemini를 사용하여 SEO 최적화된 블로그 포스트 생성 (날짜 정보 배제)"""
+    """Gemini를 사용하여 가독성이 뛰어난 블로그 포스트 생성"""
     keyword = target['keyword']
     category = target['category']
     
@@ -152,32 +147,49 @@ def generate_article(target, internal_posts, user_links, current_date):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
-    internal_ref = "내 블로그 추천글:\n" + "\n".join([f"- {p['title']}: {p['link']}" for p in selected_int])
+    internal_ref_data = "\n".join([f"제목: {p['title']} | 링크: {p['link']}" for p in selected_int])
     
     selected_ext = random.sample(user_links, min(len(user_links), 2))
-    user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
+    external_ref_data = "\n".join([f"제목: {l['title']} | 링크: {l['url']}" for l in selected_ext])
 
-    # 시스템 프롬프트: 제목과 본문에서 연도/날짜 정보를 완전히 배제하도록 수정
+    # 가독성을 극대화하기 위한 시스템 프롬프트 업데이트
     system_prompt = f"""당신은 {category} 분야의 전문 에디터입니다. 
-정확한 최신 정보를 바탕으로 키워드 '{keyword}'에 대한 블로그 글을 작성하세요.
+키워드 '{keyword}'에 대해 모바일과 PC 모두에서 가독성이 뛰어난 블로그 글을 작성하세요.
 
-[날짜 정보 배제 지침 - 매우 중요]
-1. 제목과 본문 전반에서 연도(예: 2024년, 2026년)나 구체적인 날짜 정보를 절대 포함하지 마세요.
-2. "올해", "내년", "최근 며칠간"과 같은 상대적인 시점 표현도 가급적 지양하고 보편적인 정보로 구성하세요.
-3. 구글 검색을 통해 현재 유효한 데이터를 참고하되, 글 자체는 언제 읽어도 어색하지 않은 'Evergreen' 형태로 작성하세요.
+[가독성 및 레이아웃 지침]
+1. 문단 구성: 모바일 가독성을 위해 한 문단은 반드시 2~3문장 이내로 짧게 작성하세요.
+2. 볼드(Bold) 활용: 문맥상 가장 중요한 키워드나 핵심 문장에는 <strong> 태그를 사용하여 강조하세요.
+3. 리스트 활용: 단계별 설명이나 정보 나열 시 구텐베르크 리스트 블록(<!-- wp:list -->)을 적극 사용하세요.
+4. 여백 확보: 섹션이 바뀔 때마다 명확한 소제목(H2)을 사용하여 시각적 여백을 만드세요.
 
-[구텐베르크 블록 최적화 가이드]
-1. 서버 메모리 부하 방지를 위해 복잡한 중첩 블록은 지양하세요.
-2. 모든 텍스트는 반드시 <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph --> 형식을 유지하세요.
-3. 소제목은 <!-- wp:heading {{"level":2}} --><h2>소제목</h2><!-- /wp:heading --> 형식을 사용하세요.
+[링크 삽입 규칙]
+1. 내부 링크: '내 블로그 추천글'을 본문 중간에 리스트 형식으로 자연스럽게 삽입하세요.
+   - 형식: <!-- wp:list --><ul><li><a href="원본링크">추천글 제목</a></li></ul><!-- /wp:list -->
+2. 외부 링크: '외부 참조 링크'는 섹션 하단에 버튼 블록으로 삽입하세요.
+   - 형식: <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
+     <div class="wp-block-buttons">
+       <!-- wp:button {{"className":"is-style-fill"}} -->
+       <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="원본링크">텍스트 확인하기</a></div>
+       <!-- /wp:button -->
+     </div>
+     <!-- /wp:buttons -->
 
-[출력 지침]
-- 전체 분량은 약 1500~2000자 정도로 전문성을 유지하세요.
-- 인물은 한국인(Korean person) 모델로 묘사하세요.
-- 반드시 유효한 JSON 형식으로 응답하세요. 본문 내 큰따옴표는 이스케이프 하세요.
+[기타 지침]
+- 연도 및 날짜 정보를 일절 포함하지 마세요.
+- 인물 묘사 시 한국인(Korean person) 모델을 기준으로 하세요.
+- 반드시 유효한 JSON 형식으로 응답하세요. 본문 내 큰따옴표는 이스케이프(\") 하세요.
 """
     
-    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}"
+    user_query = f"""
+[내 블로그 추천글 리스트]
+{internal_ref_data}
+
+[외부 참조 링크 리스트]
+{external_ref_data}
+
+대상 키워드: {keyword}
+카테고리: {category}
+"""
     
     response_schema = {
         "type": "object",
@@ -208,7 +220,6 @@ def generate_article(target, internal_posts, user_links, current_date):
             res = requests.post(url, json=payload, timeout=240)
             if res.status_code == 200:
                 raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                # 검색 인용 마커 제거
                 clean_text = re.sub(r'\[\d+\]', '', raw_text)
                 return json.loads(clean_text)
             else:
@@ -223,7 +234,6 @@ def generate_article(target, internal_posts, user_links, current_date):
 # 5. 워드프레스 발행 로직
 # ==========================================
 def get_or_create_term(taxonomy, name, auth):
-    """카테고리 또는 태그가 없으면 생성하고 ID를 반환"""
     endpoint = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/{taxonomy}"
     try:
         r = requests.get(f"{endpoint}?search={name}", auth=auth, timeout=10)
@@ -236,7 +246,6 @@ def get_or_create_term(taxonomy, name, auth):
     return None
 
 def post_article(data, mid):
-    """최종 생성된 데이터를 워드프레스에 포스팅"""
     print("📢 워드프레스 발행 시도 중...")
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
@@ -273,37 +282,30 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ API 키 누락"); return
 
-    # 한국 시간 기준 날짜 설정
     kst = timezone(timedelta(hours=9))
     current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
 
-    # 랜덤 대기 (서버 부하 및 자동화 탐지 방지)
     if not IS_TEST:
         delay = random.randint(0, 3300)
         print(f"⏳ {delay // 60}분 랜덤 대기...")
         time.sleep(delay)
 
-    # 1. 분야 및 롱테일 키워드 생성
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
-    # 2. 관련 리소스 로드
     user_links = load_external_links()
     recent_posts = get_recent_posts()
     
-    # 3. AI 글 생성
     data = generate_article(target, recent_posts, user_links, current_date_str)
     if not data: 
         print("❌ 콘텐츠 생성 단계에서 실패했습니다.")
         return
     
-    # 4. 이미지 생성 및 업로드
     mid = None
     if data.get('image_prompt'):
         img_data = generate_image_process(data['image_prompt'])
         if img_data: mid = upload_to_wp_media(img_data)
     
-    # 5. 워드프레스 최종 발행
     post_article(data, mid)
 
 if __name__ == "__main__":
