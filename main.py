@@ -100,8 +100,42 @@ class VersatileKeywordEngine:
 # ==========================================
 # 3. 워드프레스 및 이미지 처리 & 링크 수집
 # ==========================================
+def get_rss_links(rss_urls):
+    """지정된 RSS 피드 주소들로부터 최신 글의 제목과 링크를 수집 (정규표현식 보조 파싱)"""
+    rss_links = []
+    print(f"📡 RSS 피드에서 외부 링크 수집 중...", flush=True)
+    for url in rss_urls:
+        try:
+            response = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
+            if response.status_code == 200:
+                content = response.text
+                
+                # ElementTree 파싱 시도
+                try:
+                    # XML 선언 뒤의 부적절한 문자 제거 시도
+                    content_clean = re.sub(r'^[^\<]*', '', content) 
+                    root = ET.fromstring(content_clean.encode('utf-8'))
+                    
+                    for item in root.findall(".//item")[:5]:
+                        title = item.find("title").text if item.find("title") is not None else ""
+                        link = item.find("link").text if item.find("link") is not None else ""
+                        if title and link:
+                            rss_links.append({"title": title.strip(), "url": link.strip()})
+                except ET.ParseError:
+                    # ElementTree 실패 시 정규표현식으로 제목과 링크 추출 (강제 복구)
+                    items = re.findall(r'<item>(.*?)</item>', content, re.DOTALL)
+                    for item in items[:5]:
+                        title_match = re.search(r'<title>(.*?)</title>', item, re.DOTALL)
+                        link_match = re.search(r'<link>(.*?)</link>', item, re.DOTALL)
+                        if title_match and link_match:
+                            title = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', title_match.group(1)).strip()
+                            link = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', link_match.group(1)).strip()
+                            rss_links.append({"title": title, "url": link})
+        except Exception as e:
+            print(f"⚠️ RSS 수집 실패 ({url}): {e}", flush=True)
+    return rss_links
+
 def load_external_links_from_json():
-    """links.json 파일에서 외부 링크 목록을 로드"""
     file_path = "links.json"
     default_links = [{"title": "virz.net", "url": "https://virz.net"}]
     if os.path.exists(file_path):
@@ -111,36 +145,7 @@ def load_external_links_from_json():
         except: return default_links
     return default_links
 
-def get_rss_links(rss_urls):
-    """지정된 RSS 피드 주소들로부터 최신 글의 제목과 링크를 수집"""
-    rss_links = []
-    print(f"📡 RSS 피드에서 외부 링크 수집 중...", flush=True)
-    for url in rss_urls:
-        try:
-            response = requests.get(url, timeout=15)
-            if response.status_code == 200:
-                # XML 파싱 (RSS 2.0 및 Atom 대응)
-                root = ET.fromstring(response.content)
-                # RSS 2.0 기준 (item > title, link)
-                for item in root.findall(".//item")[:5]: # 피드당 최신 5개만 수집
-                    title = item.find("title").text if item.find("title") is not None else ""
-                    link = item.find("link").text if item.find("link") is not None else ""
-                    if title and link:
-                        rss_links.append({"title": title.strip(), "url": link.strip()})
-                # Atom 기준 (entry > title, link)
-                if not rss_links:
-                    for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry")[:5]:
-                        title = entry.find("{http://www.w3.org/2005/Atom}title").text
-                        link_node = entry.find("{http://www.w3.org/2005/Atom}link")
-                        link = link_node.attrib.get('href') if link_node is not None else ""
-                        if title and link:
-                            rss_links.append({"title": title.strip(), "url": link.strip()})
-        except Exception as e:
-            print(f"⚠️ RSS 수집 실패 ({url}): {e}", flush=True)
-    return rss_links
-
 def get_recent_posts():
-    """워드프레스에서 최근 포스트 목록을 가져와 내부 링크로 활용"""
     try:
         res = requests.get(f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=10&_fields=title,link", timeout=10)
         if res.status_code == 200:
@@ -173,10 +178,10 @@ def upload_to_wp_media(img_data):
     return None
 
 # ==========================================
-# 4. 고도화된 콘텐츠 생성 (구텐베르크 블록 최적화)
+# 4. 고도화된 콘텐츠 생성 (안정성 강화)
 # ==========================================
 def generate_article(target, internal_posts, combined_external_links, current_date):
-    """Gemini를 사용하여 구텐베르크 블록 기반의 심층 포스트 생성"""
+    """Gemini를 사용하여 구텐베르크 블록 기반의 심층 포스트 생성 (토큰 상향 및 안정성 강화)"""
     keyword = target['keyword']
     category = target['category']
     
@@ -188,42 +193,35 @@ def generate_article(target, internal_posts, combined_external_links, current_da
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
     internal_ref_data = "\n".join([f"제목: {p['title']} | 링크: {p['link']}" for p in selected_int])
     
-    # JSON 링크와 RSS 링크가 섞인 리스트에서 랜덤하게 선택
     selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
     external_ref_data = "\n".join([f"제목: {l['title']} | 링크: {l['url']}" for l in selected_ext])
 
     system_prompt = f"""당신은 {category} 분야의 전문 에디터입니다. 
-키워드 '{keyword}'에 대해 워드프레스 구텐베르크 블록 에디터(Gutenberg Block Editor) 방식에 완전히 최적화된 심층 블로그 글을 작성하세요.
+키워드 '{keyword}'에 대해 워드프레스 구텐베르크 블록 에디터 방식에 최적화된 블로그 글을 작성하세요.
 
-[매우 중요: 구텐베르크 블록 형식 지침]
-1. 모든 본문 요소는 반드시 유효한 워드프레스 블록 주석(WordPress Block Comments)으로 감싸야 합니다.
-   - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
-   - 제목(H2): <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
-   - 제목(H3): <!-- wp:heading {{"level":3}} --><h3>제목</h3><!-- /wp:heading -->
-   - 리스트: <!-- wp:list --><ul><li>항목 1</li><li>항목 2</li></ul><!-- /wp:list -->
-   - 버튼: <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
+[필수 요구사항 - 분량 및 토큰]
+- 목표 분량: 공백 제외 2,500자 ~ 3,000자 내외.
+- **매우 중요**: 글이 중간에 끊기지 않도록 끝까지 완결된 JSON 구조를 출력하세요. 
+
+[구텐베르크 블록 형식]
+- 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
+- 제목(H2): <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
+- 리스트: <!-- wp:list --><ul><li>항목</li></ul><!-- /wp:list -->
+- 버튼: <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} -->
      <div class="wp-block-buttons">
        <!-- wp:button {{"className":"is-style-fill"}} -->
        <div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">텍스트</a></div>
        <!-- /wp:button -->
      </div>
      <!-- /wp:buttons -->
-2. 단순한 HTML 태그만 나열하지 마세요. 반드시 위와 같은 <!-- wp:... --> 형식을 지키지 않으면 발행되지 않습니다.
 
-[콘텐츠 품질 및 가독성]
-1. 목표 분량: 공백 제외 2,500자 ~ 3,000자 내외의 장문 콘텐츠.
-2. 문단 구성: 한 문단(wp:paragraph)은 2~3문장 이내로 짧게 구성하세요.
-3. 볼드 처리: 핵심 키워드나 수치는 <strong> 태그를 사용하세요.
-4. 구조: 서론, 심층 본론(H2/H3 활용), 사례 및 팁, 결론/FAQ 순서로 풍성하게 구성하세요.
+[가독성]
+- 한 문단은 2~3문장 이내로 짧게 구성하세요.
+- 핵심 키워드는 <strong> 태그로 볼드 처리하세요.
 
-[링크 삽입 규칙]
-1. 내부 링크: '내 블로그 추천글' 정보를 사용하여 본문 중간에 리스트 블록으로 삽입하세요.
-2. 외부 링크: '외부 참조 링크' 정보를 본문 중간 혹은 하단에 버튼 블록으로 삽입하세요. (링크 주소를 절대로 수정하지 마세요)
-
-[기타 지침]
-- 연도 및 날짜 정보를 일절 포함하지 마세요.
-- 인물 묘사 시 한국인(Korean person) 모델을 기준으로 하세요.
-- 반드시 유효한 JSON 형식으로 응답하세요. 본문 내 큰따옴표는 이스케이프(\") 하세요.
+[기타]
+- 연도 및 날짜를 포함하지 마세요.
+- 반드시 유효한 JSON 형식으로 응답하세요. 본문 내 큰따옴표는 반드시 백슬래시로 이스케이프(\") 하세요.
 """
     
     user_query = f"""
@@ -257,7 +255,7 @@ def generate_article(target, internal_posts, combined_external_links, current_da
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseSchema": response_schema,
-            "maxOutputTokens": 4096 
+            "maxOutputTokens": 8192 # [수정] 장문 생성을 위해 토큰 제한을 대폭 상향
         }
     }
     
@@ -266,8 +264,17 @@ def generate_article(target, internal_posts, combined_external_links, current_da
             res = requests.post(url, json=payload, timeout=300)
             if res.status_code == 200:
                 raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                clean_text = re.sub(r'\[\d+\]', '', raw_text)
-                return json.loads(clean_text)
+                
+                # [안정성] JSON 파싱 전 불필요한 마크다운 코드 블록 기호 제거 및 정제
+                json_str = raw_text.strip()
+                if json_str.startswith("```"):
+                    json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
+                    json_str = re.sub(r'\s*`{3}$', '', json_str)
+                
+                # 구글 검색 인용 마커 제거
+                json_str = re.sub(r'\[\d+\]', '', json_str)
+                
+                return json.loads(json_str)
             else:
                 print(f"⚠️ API 오류 (HTTP {res.status_code}): {res.text}")
             time.sleep(2**i)
@@ -339,7 +346,7 @@ def main():
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
-    # 1. 고정 외부 링크(links.json) + 동적 RSS 링크 수집
+    # 1. 고정 외부 링크 + 동적 RSS 링크 수집
     json_links = load_external_links_from_json()
     rss_links = get_rss_links(RSS_URLS)
     combined_external_links = json_links + rss_links
@@ -347,7 +354,7 @@ def main():
     # 2. 내부 최근 포스트 로드
     recent_posts = get_recent_posts()
     
-    # 3. AI 글 생성 (수집된 전체 링크 중 무작위 선택하여 AI에게 전달)
+    # 3. AI 글 생성
     data = generate_article(target, recent_posts, combined_external_links, current_date_str)
     if not data: 
         print("❌ 콘텐츠 생성 단계에서 실패했습니다.")
