@@ -32,10 +32,9 @@ IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
 # 2. 다분야 롱테일 키워드 생성 엔진
 # ==========================================
 class VersatileKeywordEngine:
-    """건강, 복지, 생활정보 분야의 롱테일 키워드를 무작위로 생성하는 엔진"""
     def __init__(self, api_key):
         self.api_key = api_key
-        self.model = "gemini-flash-latest"
+        self.model = "gemini-2.5-flash-preview-09-2025"
         self.categories = {
             "건강정보": [
                 "만성 질환 예방 및 식단 관리", "연령대별 필수 영양제 가이드", 
@@ -55,7 +54,6 @@ class VersatileKeywordEngine:
         }
 
     def generate_target(self):
-        """카테고리를 랜덤 선택하고 구체적인 롱테일 키워드를 생성"""
         selected_cat = random.choice(list(self.categories.keys()))
         seed_topic = random.choice(self.categories[selected_cat])
         
@@ -66,20 +64,21 @@ class VersatileKeywordEngine:
 
 [조건]
 1. 검색 의도가 명확하고 정보성이 풍부해야 합니다.
-2. 결과는 반드시 아래 JSON 형식으로만 응답하세요.
+2. 결과는 반드시 JSON 형식으로만 응답하세요.
 {{
   "keyword": "구체적인 롱테일 키워드 문구",
   "category": "{selected_cat}"
 }}"""
 
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json"}
+        }
         try:
             res = requests.post(url, json=payload, timeout=30)
             if res.status_code == 200:
                 text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                match = re.search(r'\{.*\}', text, re.DOTALL)
-                if match:
-                    return json.loads(match.group())
+                return json.loads(text)
         except Exception as e:
             print(f"⚠️ 키워드 생성 실패: {e}")
         
@@ -108,7 +107,7 @@ def get_recent_posts():
 def generate_image_process(prompt):
     print(f"🎨 이미지 생성 중... (주제: {prompt[:30]}...)")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
-    final_prompt = f"High-quality commercial photography for: {prompt}. Warm atmosphere, clean composition, professional lighting. NO TEXT."
+    final_prompt = f"High-quality commercial photography for: {prompt}. Professional lighting, clean composition. NO TEXT."
     payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
     try:
         response = requests.post(url, json=payload, timeout=150)
@@ -131,7 +130,7 @@ def upload_to_wp_media(img_data):
     return None
 
 # ==========================================
-# 4. 고도화된 콘텐츠 생성 (Search Grounding 적용)
+# 4. 고도화된 콘텐츠 생성 (안정성 강화)
 # ==========================================
 def generate_article(target, internal_posts, user_links, current_date):
     keyword = target['keyword']
@@ -139,7 +138,7 @@ def generate_article(target, internal_posts, user_links, current_date):
     
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}")
     
-    model_id = "gemini-2.5-flash-preview-09-2025" # 최신 프리뷰 모델 사용
+    model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
@@ -149,30 +148,43 @@ def generate_article(target, internal_posts, user_links, current_date):
     user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
     system_prompt = f"""당신은 {category} 분야의 전문 에디터입니다. 
-오늘 날짜 {current_date} 기준 최신 정보와 데이터를 바탕으로 롱테일 키워드 '{keyword}'에 대한 심층 포스팅을 작성하세요.
+오늘 날짜 {current_date} 기준 최신 정보를 바탕으로 키워드 '{keyword}'에 대한 블로그 글을 작성하세요.
 
-[필수 사항: 구글 검색 활용]
-- 복지 정책이나 건강 정보의 경우 반드시 실시간 검색 결과를 바탕으로 정확한 수치와 신청 방법을 포함하세요.
+[필수 사항: 구글 검색]
+- 최신 수치, 신청 방법, 기간 등을 반드시 검색하여 정확하게 포함하세요. 
 
 [필수 사항: 구텐베르크 블록]
-- <!-- wp:paragraph -->, <!-- wp:heading {{"level":2}} --> 등의 블록 주석을 완벽하게 사용하세요.
-- 소제목에 숫자나 기호(1., 가.)를 사용하지 마세요.
-- 외부 링크는 섹션 하단에 버튼 블록으로 삽입하세요.
+- 모든 텍스트는 <!-- wp:paragraph --> 등 워드프레스 블록 주석으로 감싸야 합니다.
+- 소제목에 숫자/기호를 쓰지 마세요.
+- 인물은 한국인(Korean person) 모델로 묘사하세요.
 
-[이미지 가이드]
-- 인물 포함 시 기본 한국인(Korean person) 모델로 설정하세요.
-
-JSON 구조: title, category, content, excerpt, tags, image_prompt.
+[JSON 출력]
+- 반드시 유효한 JSON 형식으로 응답하세요. 본문 내 큰따옴표는 이스케이프 하세요.
 """
     
-    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n대상 키워드: {keyword}\n카테고리: {category}"
+    user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}"
     
+    # 응답 스키마 정의 (안정성 확보)
+    response_schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "category": {"type": "string"},
+            "content": {"type": "string"},
+            "excerpt": {"type": "string"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "image_prompt": {"type": "string"}
+        },
+        "required": ["title", "category", "content", "excerpt", "tags", "image_prompt"]
+    }
+
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "tools": [{"google_search": {}}], # 구글 검색 도구 활성화
+        "tools": [{"google_search": {}}],
         "generationConfig": {
             "responseMimeType": "application/json",
+            "responseSchema": response_schema,
             "maxOutputTokens": 8192
         }
     }
@@ -182,14 +194,14 @@ JSON 구조: title, category, content, excerpt, tags, image_prompt.
             res = requests.post(url, json=payload, timeout=240)
             if res.status_code == 200:
                 raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                json_str = "".join(c for c in raw_text.strip() if ord(c) >= 32 or c in '\n\r\t')
-                if json_str.startswith("```"):
-                    json_str = re.sub(r'^`{3}(?:json)?\s*', '', json_str)
-                    json_str = re.sub(r'\s*`{3}$', '', json_str)
-                return json.loads(json_str)
+                # 인용 마커 [1], [2] 등이 JSON 파싱을 방해할 수 있으므로 제거
+                clean_text = re.sub(r'\[\d+\]', '', raw_text)
+                return json.loads(clean_text)
+            else:
+                print(f"⚠️ API 오류 (HTTP {res.status_code}): {res.text}")
             time.sleep(2**i)
         except Exception as e:
-            print(f"⚠️ 생성 실패: {e}")
+            print(f"⚠️ 생성 실패 (시도 {i+1}/5): {e}")
             time.sleep(2**i)
     return None
 
@@ -209,7 +221,7 @@ def get_or_create_term(taxonomy, name, auth):
     return None
 
 def post_article(data, mid):
-    print("📢 워드프레스 발행 중...")
+    print("📢 워드프레스 발행 시도 중...")
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
@@ -230,9 +242,12 @@ def post_article(data, mid):
     try:
         res = requests.post(url, auth=auth, json=payload, timeout=40)
         if res.status_code == 201:
-            print(f"🚀 완료: {res.json().get('link')}")
+            print(f"🚀 발행 성공: {res.json().get('link')}")
             return True
-    except: pass
+        else:
+            print(f"❌ 발행 실패 (HTTP {res.status_code}): {res.text}")
+    except Exception as e:
+        print(f"❌ 발행 중 예외 발생: {e}")
     return False
 
 # ==========================================
@@ -250,25 +265,22 @@ def main():
         print(f"⏳ {delay // 60}분 랜덤 대기...")
         time.sleep(delay)
 
-    # 1. 분야 및 롱테일 키워드 결정
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target()
     
-    # 2. 관련 데이터 로드
     user_links = load_external_links()
     recent_posts = get_recent_posts()
     
-    # 3. AI 글 생성 (구글 검색 활용)
     data = generate_article(target, recent_posts, user_links, current_date_str)
-    if not data: return
+    if not data: 
+        print("❌ 콘텐츠 생성 단계에서 실패했습니다.")
+        return
     
-    # 4. 이미지 생성 및 업로드
     mid = None
     if data.get('image_prompt'):
         img_data = generate_image_process(data['image_prompt'])
         if img_data: mid = upload_to_wp_media(img_data)
     
-    # 5. 워드프레스 발행
     post_article(data, mid)
 
 if __name__ == "__main__":
