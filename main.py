@@ -56,22 +56,22 @@ class VersatileKeywordEngine:
         }
 
     def generate_target(self, current_date):
-        """현재 시점을 인지하되, 불필요한 연도 언급을 지양하는 키워드 생성"""
+        """현재 시점을 인지하되, 제목과 키워드에서 연도를 배제함"""
         selected_cat = random.choice(list(self.categories.keys()))
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         
+        # 키워드 생성 시 연도 포함 금지 지침 강화
         prompt = f"""당신은 SEO 전문가입니다. 오늘 날짜는 {current_date}입니다.
 분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 현재 시점에 가장 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
 
 [지침]
 1. 검색 의도가 명확하고 정보가 풍부한 주제를 선정하세요.
-2. '2026년'과 같은 연도는 특정 정책이나 매년 바뀌는 혜택처럼 연도 표기가 필수적인 경우에만 포함하세요.
-3. 일반적인 건강 상식이나 생활 팁에는 연도를 붙이지 마세요.
-4. 결과는 반드시 JSON 형식으로만 응답하세요.
+2. 생성되는 키워드에 '2026년'이나 특정 날짜 정보를 절대로 포함하지 마세요.
+3. 결과는 반드시 JSON 형식으로만 응답하세요.
 {{
-  "keyword": "구체적인 롱테일 키워드 문구",
+  "keyword": "연도 정보가 없는 구체적인 롱테일 키워드 문구",
   "category": "{selected_cat}"
 }}"""
 
@@ -123,7 +123,7 @@ def generate_image_process(prompt):
             result = response.json()
             if 'predictions' in result:
                 b64_data = result['predictions'][0]['bytesBase64Encoded']
-                return base64.b64decode(b64_data)
+                return base64.decodebytes(b64_data.encode())
     except: pass
     return None
 
@@ -142,7 +142,7 @@ def upload_to_wp_media(img_data):
 # 4. 고도화된 콘텐츠 생성 (안정성 및 메모리 최적화)
 # ==========================================
 def generate_article(target, internal_posts, user_links, current_date):
-    """Gemini를 사용하여 SEO 최적화된 블로그 포스트 생성"""
+    """Gemini를 사용하여 SEO 최적화된 블로그 포스트 생성 (날짜 정보 배제)"""
     keyword = target['keyword']
     category = target['category']
     
@@ -157,29 +157,28 @@ def generate_article(target, internal_posts, user_links, current_date):
     selected_ext = random.sample(user_links, min(len(user_links), 2))
     user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
-    # 서버 메모리 부하 방지를 위해 블록 구조 단순화 및 분량 조절
+    # 시스템 프롬프트: 제목과 본문에서 연도/날짜 정보를 완전히 배제하도록 수정
     system_prompt = f"""당신은 {category} 분야의 전문 에디터입니다. 
-오늘 날짜 {current_date}를 기준으로 정확한 정보를 바탕으로 키워드 '{keyword}'에 대한 블로그 글을 작성하세요.
+정확한 최신 정보를 바탕으로 키워드 '{keyword}'에 대한 블로그 글을 작성하세요.
 
-[시의성 가이드]
-1. 오늘 날짜를 기준으로 가장 최신의 정보를 제공하되, 연도 표기는 필수적인 경우에만 사용하세요.
-2. 구글 검색 도구를 통해 현재 시점의 유효한 데이터를 확인하고 반영하세요.
+[날짜 정보 배제 지침 - 매우 중요]
+1. 제목과 본문 전반에서 연도(예: 2024년, 2026년)나 구체적인 날짜 정보를 절대 포함하지 마세요.
+2. "올해", "내년", "최근 며칠간"과 같은 상대적인 시점 표현도 가급적 지양하고 보편적인 정보로 구성하세요.
+3. 구글 검색을 통해 현재 유효한 데이터를 참고하되, 글 자체는 언제 읽어도 어색하지 않은 'Evergreen' 형태로 작성하세요.
 
 [구텐베르크 블록 최적화 가이드]
 1. 서버 메모리 부하 방지를 위해 복잡한 중첩 블록은 지양하세요.
 2. 모든 텍스트는 반드시 <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph --> 형식을 유지하세요.
 3. 소제목은 <!-- wp:heading {{"level":2}} --><h2>소제목</h2><!-- /wp:heading --> 형식을 사용하세요.
-4. 블록 주석이 깨지지 않도록 여는 주석과 닫는 주석을 엄격히 짝지으세요.
 
 [출력 지침]
-- 전체 분량은 약 1500~2000자 정도로 전문성을 유지하면서도 핵심 위주로 작성하세요.
+- 전체 분량은 약 1500~2000자 정도로 전문성을 유지하세요.
 - 인물은 한국인(Korean person) 모델로 묘사하세요.
 - 반드시 유효한 JSON 형식으로 응답하세요. 본문 내 큰따옴표는 이스케이프 하세요.
 """
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}"
     
-    # 응답 스키마 강제 적용
     response_schema = {
         "type": "object",
         "properties": {
@@ -196,11 +195,11 @@ def generate_article(target, internal_posts, user_links, current_date):
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "tools": [{"google_search": {}}], # 실시간 검색 활용
+        "tools": [{"google_search": {}}], 
         "generationConfig": {
             "responseMimeType": "application/json",
             "responseSchema": response_schema,
-            "maxOutputTokens": 4096 # 출력량 제한 (서버 500 에러 방지용)
+            "maxOutputTokens": 4096 
         }
     }
     
