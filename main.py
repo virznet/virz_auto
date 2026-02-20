@@ -24,7 +24,7 @@ if sys.stdout.encoding != 'utf-8':
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 WP_USERNAME = os.environ.get('WP_USERNAME', '').strip()
 WP_APP_PASSWORD = os.environ.get('WP_APP_PASSWORD', '').replace(' ', '').strip()
-WP_BASE_URL = "https://virz.net" 
+WP_BASE_URL = os.environ.get('WP_BASE_URL', '').strip() 
 
 IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
 
@@ -34,7 +34,7 @@ IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        # 최신 Flash 모델을 사용하도록 변경
+        # 최신 Flash 모델 사용
         self.model = "gemini-flash-latest"
         self.categories = {
             "건강정보": [
@@ -54,18 +54,22 @@ class VersatileKeywordEngine:
             ]
         }
 
-    def generate_target(self):
+    def generate_target(self, current_date):
+        """현재 시점을 인지하되, 불필요한 연도 언급을 지양하는 키워드 생성"""
         selected_cat = random.choice(list(self.categories.keys()))
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         
-        prompt = f"""당신은 SEO 전문가입니다. 분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 
-한국인들이 실제로 네이버나 구글에 검색할 법한 아주 구체적인 '롱테일 키워드' 1개를 생성하세요. 
+        # 키워드 생성 프롬프트 수정: 꼭 필요한 경우에만 연도 포함
+        prompt = f"""당신은 SEO 전문가입니다. 오늘 날짜는 {current_date}입니다.
+분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 현재 시점에 가장 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
 
-[조건]
-1. 검색 의도가 명확하고 정보성이 풍부해야 합니다.
-2. 결과는 반드시 JSON 형식으로만 응답하세요.
+[지침]
+1. 검색 의도가 명확하고 정보가 풍부한 주제를 선정하세요.
+2. '2026년'과 같은 연도는 특정 정책이나 매년 바뀌는 혜택처럼 연도 표기가 필수적인 경우에만 포함하세요.
+3. 일반적인 건강 상식이나 생활 팁에는 연도를 붙이지 마세요.
+4. 결과는 반드시 JSON 형식으로만 응답하세요.
 {{
   "keyword": "구체적인 롱테일 키워드 문구",
   "category": "{selected_cat}"
@@ -139,7 +143,6 @@ def generate_article(target, internal_posts, user_links, current_date):
     
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}")
     
-    # 최신 Flash 모델을 사용하도록 변경
     model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
@@ -149,11 +152,15 @@ def generate_article(target, internal_posts, user_links, current_date):
     selected_ext = random.sample(user_links, min(len(user_links), 2))
     user_ext_ref = "외부 링크:\n" + "\n".join([f"- {l['title']}: {l['url']}" for l in selected_ext])
 
+    # 시스템 프롬프트 수정: 연도 표기 최소화 및 시의성 유지
     system_prompt = f"""당신은 {category} 분야의 전문 에디터입니다. 
-오늘 날짜 {current_date} 기준 최신 정보를 바탕으로 키워드 '{keyword}'에 대한 블로그 글을 작성하세요.
+오늘 날짜 {current_date}를 기준으로 정확한 정보를 바탕으로 키워드 '{keyword}'에 대한 블로그 글을 작성하세요.
 
-[필수 사항: 구글 검색]
-- 최신 수치, 신청 방법, 기간 등을 반드시 검색하여 정확하게 포함하세요. 
+[시의성 가이드]
+1. 오늘 날짜를 기준으로 가장 최신의 정확한 정보를 제공하세요.
+2. 제목이나 본문에서 연도(예: 2026년)는 꼭 필요한 경우(예: 특정 연도 정책 언급)에만 사용하세요. 
+3. 상시 적용되는 건강 정보나 생활 팁에는 불필요하게 연도를 붙여 글의 수명을 단축시키지 마세요.
+4. 구글 검색을 통해 현재 시점의 유효한 데이터를 확인하되, 과거(2024~2025) 정보와 혼동하지 마세요.
 
 [필수 사항: 구텐베르크 블록]
 - 모든 텍스트는 <!-- wp:paragraph --> 등 워드프레스 블록 주석으로 감싸야 합니다.
@@ -166,7 +173,6 @@ def generate_article(target, internal_posts, user_links, current_date):
     
     user_query = f"{internal_ref}\n\n{user_ext_ref}\n\n키워드: {keyword}\n카테고리: {category}"
     
-    # 응답 스키마 정의 (안정성 확보)
     response_schema = {
         "type": "object",
         "properties": {
@@ -196,7 +202,6 @@ def generate_article(target, internal_posts, user_links, current_date):
             res = requests.post(url, json=payload, timeout=240)
             if res.status_code == 200:
                 raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                # 인용 마커 [1], [2] 등이 JSON 파싱을 방해할 수 있으므로 제거
                 clean_text = re.sub(r'\[\d+\]', '', raw_text)
                 return json.loads(clean_text)
             else:
@@ -268,7 +273,7 @@ def main():
         time.sleep(delay)
 
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
-    target = engine.generate_target()
+    target = engine.generate_target(current_date_str)
     
     user_links = load_external_links()
     recent_posts = get_recent_posts()
