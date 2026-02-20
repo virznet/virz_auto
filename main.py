@@ -34,7 +34,8 @@ IS_TEST = os.environ.get('TEST_MODE', 'false').lower() == 'true'
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        self.model = "gemini-2.5-flash-preview-09-2025"
+        # 최신 Flash 모델을 사용하도록 변경
+        self.model = "gemini-flash-latest"
         self.categories = {
             "건강정보": [
                 "만성 질환 예방 및 식단 관리", "연령대별 필수 영양제 가이드", 
@@ -138,7 +139,8 @@ def generate_article(target, internal_posts, user_links, current_date):
     
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}")
     
-    model_id = "gemini-2.5-flash-preview-09-2025"
+    # 최신 Flash 모델을 사용하도록 변경
+    model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
