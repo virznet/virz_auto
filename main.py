@@ -36,7 +36,7 @@ RSS_URLS = [
 ]
 
 # [2026-03-04 기준] 테스트 모드 활성화 (True: 즉시 실행 / False: 랜덤 대기 적용)
-IS_TEST = False
+IS_TEST = True
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
@@ -73,7 +73,7 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        # [수정] 2026년 기준 최신 안정화 텍스트 모델 적용
+        # 2026년 기준 최신 안정화 텍스트 모델 적용
         self.model = "gemini-flash-latest" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
@@ -145,13 +145,11 @@ def generate_image_process(prompt):
     """최신 Imagen 4.0 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
     print(f"🎨 이미지 생성 시도 중... (프롬프트: {prompt[:50]}...)", flush=True)
     
-    # 2026년 기준 최신 이미지 생성 모델 및 엔드포인트 적용
     model_id = "imagen-4.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
     
     final_prompt = f"Korean person, {prompt}. Professional photography, clean composition, high resolution. NO TEXT."
     
-    # Imagen 4.0 전용 페이로드 구조
     payload = {
         "instances": [{"prompt": final_prompt}], 
         "parameters": {"sampleCount": 1}
@@ -197,18 +195,20 @@ def generate_article(target, internal_posts, combined_external_links):
     
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
-    # [수정] 텍스트 모델 최신 버전으로 강제 지정
     model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
     selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
 
+    # 시스템 프롬프트 강화: 마크다운 기호 사용 금지 및 요약문(excerpt) 필수 포함
     system_prompt = f"""당신은 {category} 전문 에디터입니다. 구텐베르크 블록 에디터 방식에 최적화된 심층 글을 작성하세요.
 - 분량: 2,500자 이상.
 - 날짜 제외: 2026년 등 연도, 월, 일 정보를 제목과 본문에 포함하지 마세요. (상록수 콘텐츠 지향)
 - 인물: 한국인(Korean person) 기준.
-- 필수 포함 JSON 키: "title", "content", "image_prompt", "category", "tags"
+- 필수 포함 JSON 키: "title", "content", "excerpt", "image_prompt", "category", "tags"
+- 요약문(excerpt): 검색 결과에 노출될 매력적인 150자 내외의 요약문을 작성하세요.
+- 마크다운 금지: 본문(content) 내에 #, ##, **, * 와 같은 마크다운 서식 기호를 절대 사용하지 마세요. 오직 제공된 워드프레스 블록 주석과 표준 HTML 태그만 사용하세요.
 - 형식: 
   - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
   - 제목: <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
@@ -227,7 +227,11 @@ def generate_article(target, internal_posts, combined_external_links):
     if res:
         try:
             raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-            data = json.loads(raw_text.strip().replace('```json', '').replace('```', ''))
+            # JSON 외의 마크다운 래퍼(```json 등) 제거 로직 강화
+            json_str = re.sub(r'^```[a-z]*\n', '', raw_text.strip(), flags=re.IGNORECASE)
+            json_str = re.sub(r'\n```$', '', json_str.strip())
+            
+            data = json.loads(json_str)
             
             if isinstance(data, list) and len(data) > 0:
                 data = data[0]
@@ -269,6 +273,7 @@ def post_article(data, mid):
     payload = {
         "title": data['title'], 
         "content": data['content'], 
+        "excerpt": data.get('excerpt', ''), # 요약문 필드 추가
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids, 
         "featured_media": mid, 
@@ -300,11 +305,9 @@ def main():
         print(f"⏳ {delay // 60}분 랜덤 대기...", flush=True)
         time.sleep(delay)
 
-    # 2026년 3월 4일 시간 설정
     kst = timezone(timedelta(hours=9))
     current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
 
-    # 키워드 생성
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
@@ -312,7 +315,6 @@ def main():
         print("❌ 키워드 생성 실패")
         return
 
-    # 외부 리소스 수집
     combined_external_links = load_external_links_from_json() + get_rss_links(RSS_URLS)
     recent_posts = get_recent_posts()
     
