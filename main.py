@@ -35,9 +35,8 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# 테스트 모드 설정 로직
-# [수정] 강제로 테스트 모드를 활성화하도록 설정하였습니다. (랜덤 대기 시간 없음)
-IS_TEST = True
+# 테스트 모드 설정 (True일 경우 대기 시간 없음)
+IS_TEST = False
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
@@ -55,16 +54,16 @@ def safe_api_call(url, payload, method="POST", timeout=300):
             if res.status_code == 200:
                 return res
             elif res.status_code == 404:
-                print(f"⚠️ API 오류 (HTTP 404): 요청 경로를 찾을 수 없습니다. 모델명을 확인하세요. URL: {url}")
+                print(f"⚠️ API 오류 (HTTP 404): URL을 확인하세요. URL: {url}")
                 return None
             elif res.status_code == 429:
-                print(f"⚠️ 할당량 일시 초과(429). {delays[i]}초 후 다시 시도합니다...")
+                print(f"⚠️ 할당량 초과(429). {delays[i]}초 후 다시 시도...")
                 time.sleep(delays[i])
             else:
-                print(f"⚠️ API 오류 (HTTP {res.status_code}). 응답: {res.text[:100]}")
+                print(f"⚠️ API 오류 (HTTP {res.status_code}). 응답: {res.text[:200]}")
                 time.sleep(delays[i])
         except Exception as e:
-            print(f"⚠️ 요청 중 예외 발생: {e}. {delays[i]}초 후 다시 시도합니다...")
+            print(f"⚠️ 요청 중 예외 발생: {e}. {delays[i]}초 후 다시 시도...")
             time.sleep(delays[i])
     return None
 
@@ -74,7 +73,6 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        # [수정] gemini-1.5-flash-latest 대신 gemini-flash-latest 사용 (최신 안정화 모델)
         self.model = "gemini-flash-latest" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
@@ -87,16 +85,7 @@ class VersatileKeywordEngine:
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        prompt = f"""당신은 SEO 전문가입니다. 분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 
-현재 시점에 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
-
-[지침]
-1. 연도(2026년 등)나 특정 날짜 정보를 절대로 포함하지 마세요.
-2. 결과는 반드시 JSON 형식으로만 응답하세요.
-{{
-  "keyword": "연도 정보가 없는 롱테일 키워드",
-  "category": "{selected_cat}"
-}}"""
+        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 롱테일 키워드 1개를 JSON으로 생성하세요. 연도는 제외하세요."
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -108,9 +97,7 @@ class VersatileKeywordEngine:
             try:
                 text = res.json()['candidates'][0]['content']['parts'][0]['text']
                 return json.loads(text)
-            except Exception as e:
-                print(f"⚠️ 키워드 JSON 파싱 실패: {e}")
-        
+            except: pass
         return {"keyword": f"{seed_topic} 상세 가이드", "category": selected_cat}
 
 # ==========================================
@@ -124,23 +111,14 @@ def get_rss_links(rss_urls):
             response = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
             if response.status_code == 200:
                 content = response.text
-                content_clean = re.sub(r'^[^\<]*', '', content) 
-                try:
-                    root = ET.fromstring(content_clean.encode('utf-8'))
-                    for item in root.findall(".//item")[:5]:
-                        title = item.find("title").text if item.find("title") is not None else ""
-                        link = item.find("link").text if item.find("link") is not None else ""
-                        if title and link:
-                            rss_links.append({"title": title.strip(), "url": link.strip()})
-                except:
-                    items = re.findall(r'<item>(.*?)</item>', content, re.DOTALL)
-                    for item in items[:5]:
-                        title_match = re.search(r'<title>(.*?)</title>', item, re.DOTALL)
-                        link_match = re.search(r'<link>(.*?)</link>', item, re.DOTALL)
-                        if title_match and link_match:
-                            t = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', title_match.group(1)).strip()
-                            l = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', link_match.group(1)).strip()
-                            rss_links.append({"title": t, "url": l})
+                items = re.findall(r'<item>(.*?)</item>', content, re.DOTALL)
+                for item in items[:3]:
+                    title_match = re.search(r'<title>(.*?)</title>', item, re.DOTALL)
+                    link_match = re.search(r'<link>(.*?)</link>', item, re.DOTALL)
+                    if title_match and link_match:
+                        t = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', title_match.group(1)).strip()
+                        l = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', link_match.group(1)).strip()
+                        rss_links.append({"title": t, "url": l})
         except: pass
     return rss_links
 
@@ -161,12 +139,11 @@ def get_recent_posts():
 
 def generate_image_process(prompt):
     """최신 Imagen 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
-    print(f"🎨 이미지 생성 중...", flush=True)
-    # 최신 Imagen 4.0 모델 명칭 적용
-    model_id = "imagen-4.0-generate-001"
+    print(f"🎨 이미지 생성 시도 중... (프롬프트: {prompt[:50]}...)", flush=True)
+    model_id = "imagen-3.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
     
-    final_prompt = f"High-quality commercial photography for: {prompt}. Featuring a Korean person, professional lighting, clean composition. NO TEXT."
+    final_prompt = f"Korean person, {prompt}. Professional photography, clean composition, high resolution. NO TEXT."
     payload = {
         "instances": [{"prompt": final_prompt}], 
         "parameters": {"sampleCount": 1}
@@ -178,11 +155,11 @@ def generate_image_process(prompt):
             result = res.json()
             if 'predictions' in result:
                 b64_data = result['predictions'][0]['bytesBase64Encoded']
-                raw_bytes = base64.b64decode(b64_data)
-                img = Image.open(io.BytesIO(raw_bytes))
+                img = Image.open(io.BytesIO(base64.b64decode(b64_data)))
                 if img.mode in ("RGBA", "P"): img = img.convert("RGB")
                 output_buffer = io.BytesIO()
                 img.save(output_buffer, format="JPEG", quality=70, optimize=True)
+                print("✅ 이미지 변환 및 최적화 완료 (JPG 70%)")
                 return output_buffer.getvalue()
         except Exception as e:
             print(f"⚠️ 이미지 데이터 처리 실패: {e}")
@@ -194,58 +171,55 @@ def upload_to_wp_media(img_data):
     headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.jpg", "Content-Type": "image/jpeg"}
     try:
         res = requests.post(url, auth=auth, headers=headers, data=img_data, timeout=60)
-        if res.status_code == 201: return res.json()['id']
+        if res.status_code == 201: 
+            print(f"✅ 미디어 업로드 성공 (ID: {res.json()['id']})")
+            return res.json()['id']
     except: pass
     return None
 
 # ==========================================
 # 5. 고도화된 콘텐츠 생성 (Gutenberg 최적화)
 # ==========================================
-def generate_article(target, internal_posts, combined_external_links, current_date):
-    """Gemini를 사용하여 심층적인 블로그 콘텐츠 생성"""
+def generate_article(target, internal_posts, combined_external_links):
     keyword = target['keyword']
     category = target['category']
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
-    # [수정] gemini-1.5-flash-latest 대신 gemini-flash-latest 사용
     model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
-    internal_ref_data = "\n".join([f"제목: {p['title']} | 링크: {p['link']}" for p in selected_int])
-    
     selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
-    external_ref_data = "\n".join([f"제목: {l['title']} | 링크: {l['url']}" for l in selected_ext])
 
-    system_prompt = f"""당신은 {category} 전문 에디터입니다. 구텐베르크 블록 에디터 방식에 최적화된 글을 작성하세요.
-- 분량: 2,500~3,000자 내외의 깊이 있는 내용.
-- 날짜 정보 배제: 연도, 월, 일 정보를 제목과 본문에 포함하지 마세요. (상록수 콘텐츠 지향)
-- 인물 묘사: 한국인(Korean person) 기준.
+    system_prompt = f"""당신은 {category} 전문 에디터입니다. 구텐베르크 블록 에디터 방식에 최적화된 심층 글을 작성하세요.
+- 분량: 2,500자 이상.
+- 날짜 제외: 연도, 월, 일 정보를 제목과 본문에 포함하지 마세요.
+- 인물: 한국인(Korean person) 기준.
+- 필수 포함 JSON 키: "title", "content", "image_prompt", "category", "tags"
 - 형식: 
   - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
   - 제목: <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
-  - 버튼: <!-- wp:buttons {{"layout":{{"type":"flex","justifyContent":"center"}}}} --><div class="wp-block-buttons"><!-- wp:button {{"className":"is-style-fill"}} --><div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="URL">텍스트</a></div><!-- /wp:button --></div><!-- /wp:buttons -->
-- 출력: 반드시 완결된 JSON으로 응답."""
+- 출력: 반드시 유효한 JSON으로 응답하세요."""
     
-    user_query = f"내부추천:\n{internal_ref_data}\n\n외부참조:\n{external_ref_data}\n\n키워드: {keyword}"
+    user_query = f"내부링크: {selected_int}\n외부링크: {selected_ext}\n키워드: {keyword}"
     
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "tools": [{"google_search": {}}], 
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "maxOutputTokens": 8192
-        }
+        "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 8192}
     }
     
     res = safe_api_call(url, payload, timeout=400)
     if res:
         try:
             raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-            json_str = raw_text.strip().replace('```json', '').replace('```', '')
-            json_str = re.sub(r'\[\d+\]', '', json_str)
-            return json.loads(json_str)
+            data = json.loads(raw_text.strip().replace('```json', '').replace('```', ''))
+            # 필수 데이터 검증
+            if not data.get('title') or not data.get('content'):
+                print("⚠️ AI 응답에 필수 필드(title/content)가 누락되었습니다.")
+                return None
+            return data
         except Exception as e:
             print(f"⚠️ 콘텐츠 JSON 파싱 실패: {e}")
     return None
@@ -266,7 +240,8 @@ def get_or_create_term(taxonomy, name, auth):
     return None
 
 def post_article(data, mid):
-    print("📢 워드프레스 발행 시도 중...", flush=True)
+    if not data: return False
+    print(f"📢 워드프레스 발행 시도 중: {data.get('title')}", flush=True)
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
@@ -275,9 +250,8 @@ def post_article(data, mid):
     tag_ids = [tid for tid in tag_ids if tid]
 
     payload = {
-        "title": data.get('title', '정보 안내'), 
-        "content": data.get('content', ''), 
-        "excerpt": data.get('excerpt', ''),
+        "title": data['title'], 
+        "content": data['content'], 
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids, 
         "featured_media": mid, 
@@ -290,7 +264,7 @@ def post_article(data, mid):
             print(f"🚀 발행 성공: {res.json().get('link')}")
             return True
         else:
-            print(f"❌ 워드프레스 발행 실패: {res.status_code}")
+            print(f"❌ 발행 실패: {res.status_code} - {res.text[:200]}")
     except Exception as e:
         print(f"❌ 발행 중 예외 발생: {e}")
     return False
@@ -302,42 +276,39 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ API 키 누락"); return
 
-    # 현재 모드 판별 및 출력
     if IS_TEST:
-        print("🛠️ 테스트 모드 활성화됨: 랜덤 대기 시간을 건너뜁니다.", flush=True)
+        print("🛠️ 테스트 모드: 즉시 실행", flush=True)
     else:
-        print("🚀 상용 모드 활성화됨: 랜덤 대기 시간을 시작합니다.", flush=True)
-
-    kst = timezone(timedelta(hours=9))
-    current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
-
-    if not IS_TEST:
         delay = random.randint(0, 3300)
         print(f"⏳ {delay // 60}분 랜덤 대기...", flush=True)
         time.sleep(delay)
 
-    # 1. 키워드 생성 (generate_target)
+    kst = timezone(timedelta(hours=9))
+    current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
+
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
-    # 2. 참조 데이터 수집
-    json_links = load_external_links_from_json()
-    rss_links = get_rss_links(RSS_URLS)
-    combined_external_links = json_links + rss_links
+    combined_external_links = load_external_links_from_json() + get_rss_links(RSS_URLS)
     recent_posts = get_recent_posts()
     
-    # 3. 본문 생성 (generate_article)
-    data = generate_article(target, recent_posts, combined_external_links, current_date_str)
-    if not data: 
-        print("❌ 콘텐츠 생성 단계에서 실패했습니다.")
+    # 1. 콘텐츠 생성 및 검증
+    data = generate_article(target, recent_posts, combined_external_links)
+    if not data:
+        print("❌ 유효한 콘텐츠가 생성되지 않아 프로세스를 중단합니다.")
         return
     
-    # 4. 이미지 생성 및 발행
+    # 2. 이미지 생성
     mid = None
-    if data.get('image_prompt'):
-        img_data = generate_image_process(data['image_prompt'])
-        if img_data: mid = upload_to_wp_media(img_data)
+    image_prompt = data.get('image_prompt')
+    if image_prompt:
+        img_data = generate_image_process(image_prompt)
+        if img_data: 
+            mid = upload_to_wp_media(img_data)
+    else:
+        print("⚠️ 이미지 프롬프트가 없어 이미지 생성을 건너뜁니다.")
     
+    # 3. 최종 발행
     post_article(data, mid)
 
 if __name__ == "__main__":
