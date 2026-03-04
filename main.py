@@ -74,8 +74,8 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        # [수정] 항상 최신 버전을 사용하는 모델 명칭 적용
-        self.model = "gemini-1.5-flash-latest" 
+        # [수정] gemini-1.5-flash-latest 대신 gemini-flash-latest 사용 (최신 안정화 모델)
+        self.model = "gemini-flash-latest" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
             "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "아동 수당 활용", "장애인 고용 지원"],
@@ -162,7 +162,7 @@ def get_recent_posts():
 def generate_image_process(prompt):
     """최신 Imagen 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
     print(f"🎨 이미지 생성 중...", flush=True)
-    # [수정] 최신 Imagen 4.0 모델 명칭 적용
+    # 최신 Imagen 4.0 모델 명칭 적용
     model_id = "imagen-4.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
     
@@ -207,8 +207,8 @@ def generate_article(target, internal_posts, combined_external_links, current_da
     category = target['category']
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
-    # [수정] 항상 최신 버전을 사용하는 모델 명칭 적용
-    model_id = "gemini-1.5-flash-latest"
+    # [수정] gemini-1.5-flash-latest 대신 gemini-flash-latest 사용
+    model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
