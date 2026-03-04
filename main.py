@@ -43,7 +43,7 @@ IS_TEST = True
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
 # ==========================================
 def safe_api_call(url, payload, method="POST", timeout=300):
-    """지수 백오프를 적용한 안전한 API 호출 함수 (404 오류 방지 포함)"""
+    """지수 백오프를 적용한 안전한 API 호출 함수 (404 오류 방지 및 디버깅 강화)"""
     delays = [1, 2, 4, 8, 16] 
     for i in range(len(delays)):
         try:
@@ -55,14 +55,14 @@ def safe_api_call(url, payload, method="POST", timeout=300):
             if res.status_code == 200:
                 return res
             elif res.status_code == 404:
-                # 404는 경로 문제이므로 재시도 전 URL 확인이 필요함을 알림
-                print(f"⚠️ API 오류 (HTTP 404): 요청 경로가 잘못되었습니다. URL을 확인하세요.")
+                # 404는 경로 문제이므로 재시도 전 로그 출력
+                print(f"⚠️ API 오류 (HTTP 404): 요청 경로를 찾을 수 없습니다. URL: {url}")
                 return None
             elif res.status_code == 429:
                 print(f"⚠️ 할당량 일시 초과(429). {delays[i]}초 후 다시 시도합니다...")
                 time.sleep(delays[i])
             else:
-                print(f"⚠️ API 오류 (HTTP {res.status_code}). {delays[i]}초 후 다시 시도합니다...")
+                print(f"⚠️ API 오류 (HTTP {res.status_code}). 응답: {res.text[:100]}")
                 time.sleep(delays[i])
         except Exception as e:
             print(f"⚠️ 요청 중 예외 발생: {e}. {delays[i]}초 후 다시 시도합니다...")
@@ -75,8 +75,8 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        # REST API 경로에서 가장 안정적인 표준 모델 명칭 사용
-        self.model = "gemini-1.5-flash" 
+        # [수정] 환경 내에서 지원되는 최신 프리뷰 모델 명칭으로 업데이트
+        self.model = "gemini-2.5-flash-preview-09-2025" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
             "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "장애인 고용 지원"],
@@ -87,7 +87,7 @@ class VersatileKeywordEngine:
         selected_cat = random.choice(list(self.categories.keys()))
         seed_topic = random.choice(self.categories[selected_cat])
         
-        # v1beta 엔드포인트 유지
+        # [수정] v1beta 엔드포인트 및 모델 생성 경로 최적화
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         prompt = f"""당신은 SEO 전문가입니다. 분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 
 현재 시점에 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
@@ -111,7 +111,7 @@ class VersatileKeywordEngine:
                 text = res.json()['candidates'][0]['content']['parts'][0]['text']
                 return json.loads(text)
             except Exception as e:
-                print(f"⚠️ JSON 파싱 실패: {e}")
+                print(f"⚠️ 키워드 JSON 파싱 실패: {e}")
         
         return {"keyword": f"{seed_topic} 상세 가이드", "category": selected_cat}
 
@@ -162,11 +162,18 @@ def get_recent_posts():
     except: return []
 
 def generate_image_process(prompt):
+    """최신 Imagen 4.0 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
     print(f"🎨 이미지 생성 중...", flush=True)
-    # Imagen 4.0 전용 predict 엔드포인트
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
+    # [수정] 최신 Imagen 4.0 모델 및 predict 엔드포인트 사용
+    model_id = "imagen-4.0-generate-001"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
+    
     final_prompt = f"High-quality commercial photography for: {prompt}. Featuring a Korean person, professional lighting, clean composition. NO TEXT."
-    payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
+    # [수정] Imagen 4.0 전용 페이로드 구조
+    payload = {
+        "instances": [{"prompt": final_prompt}], 
+        "parameters": {"sampleCount": 1}
+    }
     
     res = safe_api_call(url, payload, timeout=150)
     if res:
@@ -198,11 +205,13 @@ def upload_to_wp_media(img_data):
 # 5. 고도화된 콘텐츠 생성 (Gutenberg 최적화)
 # ==========================================
 def generate_article(target, internal_posts, combined_external_links, current_date):
+    """Gemini를 사용하여 심층적인 블로그 콘텐츠 생성"""
     keyword = target['keyword']
     category = target['category']
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
-    model_id = "gemini-1.5-flash"
+    # [수정] 텍스트 생성 모델 프리뷰 버전 적용
+    model_id = "gemini-2.5-flash-preview-09-2025"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
