@@ -35,10 +35,13 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# [수정 포인트] 테스트 모드 설정: 환경 변수가 없으면 기본적으로 'false'
-# 코드에서 강제로 테스트하고 싶다면 아래 줄을 IS_TEST = True 로 변경하세요.
-env_test_mode = os.environ.get('TEST_MODE', 'false').lower()
-IS_TEST = True if env_test_mode == 'true' else False
+# [수정] 테스트 모드 설정 로직 개선
+# 환경 변수 TEST_MODE가 'true'이면 True, 그 외에는 False로 설정 (공백 제거 포함)
+_raw_test_mode = os.environ.get('TEST_MODE', 'false').strip().lower()
+IS_TEST = True if _raw_test_mode == 'true' else False
+
+# 중요: 만약 환경 변수 설정이 어려우면 아래 주석(#)을 해제하여 강제로 True를 만드세요.
+# IS_TEST = True 
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
@@ -286,11 +289,11 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ API 키 누락"); return
 
-    # [수정] 현재 모드 확인 및 출력
+    # [수정] 현재 감지된 모드를 명확히 로그에 출력
     if IS_TEST:
-        print("🛠️ 테스트 모드로 실행 중입니다. 랜덤 대기 시간을 건너뜁니다.", flush=True)
+        print("🛠️ 테스트 모드 감지됨: 랜덤 대기 시간을 건너뜁니다.", flush=True)
     else:
-        print("🚀 상용 모드로 실행 중입니다. 랜덤 대기 시간을 시작합니다.", flush=True)
+        print("🚀 상용 모드 감지됨: 랜덤 대기 시간을 시작합니다.", flush=True)
 
     kst = timezone(timedelta(hours=9))
     current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
