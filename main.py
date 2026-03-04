@@ -35,18 +35,21 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# [수정] 테스트 모드 설정 로직 개선
-# 환경 변수 TEST_MODE가 'true'이면 True, 그 외에는 False로 설정 (공백 제거 포함)
-_raw_test_mode = os.environ.get('TEST_MODE', 'false').strip().lower()
-IS_TEST = True if _raw_test_mode == 'true' else False
+# [수정] 테스트 모드 설정 로직 강화
+# 환경 변수 TEST_MODE가 존재하고, 그 값이 'true'인 경우에만 True로 설정
+# .strip()을 통해 보이지 않는 공백을 제거하고 .lower()로 대소문자 무시
+raw_test_env = os.environ.get('TEST_MODE', 'false').strip().lower()
+IS_TEST = (raw_test_env == 'true')
 
-# 중요: 만약 환경 변수 설정이 어려우면 아래 주석(#)을 해제하여 강제로 True를 만드세요.
+# 만약 GitHub Actions 설정이 계속 말을 안 듣는다면, 
+# 아래 줄의 주석(#)을 제거하여 강제로 True를 만드세요.
 # IS_TEST = True 
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
 # ==========================================
 def safe_api_call(url, payload, method="POST", timeout=300):
+    """지수 백오프를 적용한 안전한 API 호출 함수"""
     delays = [1, 2, 4, 8, 16] 
     for i in range(len(delays)):
         try:
@@ -289,11 +292,12 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ API 키 누락"); return
 
-    # [수정] 현재 감지된 모드를 명확히 로그에 출력
+    # 전역 변수 IS_TEST를 다시 한번 확인하여 출력
+    # GitHub Actions의 환경 변수가 'true' 인지 정확히 판별합니다.
     if IS_TEST:
-        print("🛠️ 테스트 모드 감지됨: 랜덤 대기 시간을 건너뜁니다.", flush=True)
+        print("🛠️ 테스트 모드 활성화됨: 랜덤 대기 시간을 건너뜁니다.", flush=True)
     else:
-        print("🚀 상용 모드 감지됨: 랜덤 대기 시간을 시작합니다.", flush=True)
+        print("🚀 상용 모드 활성화됨: 랜덤 대기 시간을 시작합니다.", flush=True)
 
     kst = timezone(timedelta(hours=9))
     current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
