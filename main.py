@@ -35,10 +35,9 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# [수정] GitHub Secret의 TEST_MODE 값을 동적으로 읽어옵니다.
-# Secret에 'true'라고 적혀있으면 대기 시간을 건너뜁니다.
-_raw_test_mode = os.environ.get('TEST_MODE', 'false').strip().lower()
-IS_TEST = True if _raw_test_mode == 'true' else False
+# [수정] 테스트 모드 활성화 (True: 즉시 실행 / False: 랜덤 대기 적용)
+# 이제 GitHub Secret 설정과 관계없이 이 코드 상에서 True로 고정되어 즉시 실행됩니다.
+IS_TEST = True
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
