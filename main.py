@@ -35,22 +35,15 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# [수정] 테스트 모드 설정 로직 강화
-# 환경 변수 TEST_MODE가 존재하고, 그 값이 'true'인 경우에만 True로 설정
-# .strip()을 통해 보이지 않는 공백을 제거하고 .lower()로 대소문자 무시
-raw_test_env = os.environ.get('TEST_MODE', 'false').strip().lower()
+# 테스트 모드 설정 로직
+# [수정] 강제로 테스트 모드를 활성화하도록 설정하였습니다. (랜덤 대기 시간 없음)
 IS_TEST = True
-
-# 만약 GitHub Actions 설정이 계속 말을 안 듣는다면, 
-# 아래 줄의 주석(#)을 제거하여 강제로 True를 만드세요.
-# 파이썬은 대문자 'True'를 사용해야 합니다. (소문자 true는 에러 발생)
-# IS_TEST = True 
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
 # ==========================================
 def safe_api_call(url, payload, method="POST", timeout=300):
-    """지수 백오프를 적용한 안전한 API 호출 함수"""
+    """지수 백오프를 적용한 안전한 API 호출 함수 (404 오류 방지 포함)"""
     delays = [1, 2, 4, 8, 16] 
     for i in range(len(delays)):
         try:
@@ -61,6 +54,10 @@ def safe_api_call(url, payload, method="POST", timeout=300):
             
             if res.status_code == 200:
                 return res
+            elif res.status_code == 404:
+                # 404는 경로 문제이므로 재시도 전 URL 확인이 필요함을 알림
+                print(f"⚠️ API 오류 (HTTP 404): 요청 경로가 잘못되었습니다. URL을 확인하세요.")
+                return None
             elif res.status_code == 429:
                 print(f"⚠️ 할당량 일시 초과(429). {delays[i]}초 후 다시 시도합니다...")
                 time.sleep(delays[i])
@@ -78,7 +75,8 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        self.model = "gemini-1.5-flash-latest" 
+        # REST API 경로에서 가장 안정적인 표준 모델 명칭 사용
+        self.model = "gemini-1.5-flash" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
             "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "장애인 고용 지원"],
@@ -89,6 +87,7 @@ class VersatileKeywordEngine:
         selected_cat = random.choice(list(self.categories.keys()))
         seed_topic = random.choice(self.categories[selected_cat])
         
+        # v1beta 엔드포인트 유지
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         prompt = f"""당신은 SEO 전문가입니다. 분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 
 현재 시점에 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
@@ -111,7 +110,8 @@ class VersatileKeywordEngine:
             try:
                 text = res.json()['candidates'][0]['content']['parts'][0]['text']
                 return json.loads(text)
-            except: pass
+            except Exception as e:
+                print(f"⚠️ JSON 파싱 실패: {e}")
         
         return {"keyword": f"{seed_topic} 상세 가이드", "category": selected_cat}
 
@@ -163,6 +163,7 @@ def get_recent_posts():
 
 def generate_image_process(prompt):
     print(f"🎨 이미지 생성 중...", flush=True)
+    # Imagen 4.0 전용 predict 엔드포인트
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={GEMINI_API_KEY}"
     final_prompt = f"High-quality commercial photography for: {prompt}. Featuring a Korean person, professional lighting, clean composition. NO TEXT."
     payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
@@ -179,7 +180,8 @@ def generate_image_process(prompt):
                 output_buffer = io.BytesIO()
                 img.save(output_buffer, format="JPEG", quality=70, optimize=True)
                 return output_buffer.getvalue()
-        except: pass
+        except Exception as e:
+            print(f"⚠️ 이미지 데이터 처리 실패: {e}")
     return None
 
 def upload_to_wp_media(img_data):
@@ -200,7 +202,7 @@ def generate_article(target, internal_posts, combined_external_links, current_da
     category = target['category']
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
-    model_id = "gemini-1.5-flash-latest"
+    model_id = "gemini-1.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
@@ -238,7 +240,8 @@ def generate_article(target, internal_posts, combined_external_links, current_da
             json_str = raw_text.strip().replace('```json', '').replace('```', '')
             json_str = re.sub(r'\[\d+\]', '', json_str)
             return json.loads(json_str)
-        except: pass
+        except Exception as e:
+            print(f"⚠️ 콘텐츠 JSON 파싱 실패: {e}")
     return None
 
 # ==========================================
@@ -293,8 +296,7 @@ def main():
     if not GEMINI_API_KEY: 
         print("❌ API 키 누락"); return
 
-    # 전역 변수 IS_TEST를 다시 한번 확인하여 출력
-    # GitHub Actions의 환경 변수가 'true' 인지 정확히 판별합니다.
+    # 현재 모드 판별 및 출력
     if IS_TEST:
         print("🛠️ 테스트 모드 활성화됨: 랜덤 대기 시간을 건너뜁니다.", flush=True)
     else:
@@ -308,19 +310,23 @@ def main():
         print(f"⏳ {delay // 60}분 랜덤 대기...", flush=True)
         time.sleep(delay)
 
+    # 1. 키워드 생성 (generate_target)
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
+    # 2. 참조 데이터 수집
     json_links = load_external_links_from_json()
     rss_links = get_rss_links(RSS_URLS)
     combined_external_links = json_links + rss_links
     recent_posts = get_recent_posts()
     
+    # 3. 본문 생성 (generate_article)
     data = generate_article(target, recent_posts, combined_external_links, current_date_str)
     if not data: 
         print("❌ 콘텐츠 생성 단계에서 실패했습니다.")
         return
     
+    # 4. 이미지 생성 및 발행
     mid = None
     if data.get('image_prompt'):
         img_data = generate_image_process(data['image_prompt'])
