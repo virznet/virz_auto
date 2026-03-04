@@ -38,7 +38,7 @@ RSS_URLS = [
 # [수정] 테스트 모드 설정 로직 강화
 # 환경 변수 TEST_MODE가 존재하고, 그 값이 'true'인 경우에만 True로 설정
 # .strip()을 통해 보이지 않는 공백을 제거하고 .lower()로 대소문자 무시
-raw_test_env = os.environ.get('TEST_MODE', 'false').strip().lower()
+raw_test_env = os.environ.get('TEST_MODE', 'true').strip().lower()
 IS_TEST = (raw_test_env == 'true')
 
 # 만약 GitHub Actions 설정이 계속 말을 안 듣는다면, 
