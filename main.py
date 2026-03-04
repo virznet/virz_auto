@@ -35,8 +35,10 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# 테스트 모드 설정 (True일 경우 대기 시간 없음)
-IS_TEST = True
+# [수정] GitHub Secret의 TEST_MODE 값을 동적으로 읽어옵니다.
+# Secret에 'true'라고 적혀있으면 대기 시간을 건너뜁니다.
+_raw_test_mode = os.environ.get('TEST_MODE', 'false').strip().lower()
+IS_TEST = True if _raw_test_mode == 'true' else False
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
@@ -85,7 +87,7 @@ class VersatileKeywordEngine:
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 롱테일 키워드 1개를 JSON으로 생성하세요. 연도는 제외하세요."
+        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 합니다."
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -96,7 +98,11 @@ class VersatileKeywordEngine:
         if res:
             try:
                 text = res.json()['candidates'][0]['content']['parts'][0]['text']
-                return json.loads(text)
+                data = json.loads(text)
+                # [오류 방지] 리스트 형식으로 반환된 경우 첫 번째 요소를 선택
+                if isinstance(data, list) and len(data) > 0:
+                    data = data[0]
+                return data
             except: pass
         return {"keyword": f"{seed_topic} 상세 가이드", "category": selected_cat}
 
@@ -138,7 +144,6 @@ def get_recent_posts():
     except: return []
 
 def generate_image_process(prompt):
-    """최신 Imagen 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
     print(f"🎨 이미지 생성 시도 중... (프롬프트: {prompt[:50]}...)", flush=True)
     model_id = "imagen-3.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
@@ -181,8 +186,13 @@ def upload_to_wp_media(img_data):
 # 5. 고도화된 콘텐츠 생성 (Gutenberg 최적화)
 # ==========================================
 def generate_article(target, internal_posts, combined_external_links):
-    keyword = target['keyword']
-    category = target['category']
+    # [오류 방지] target이 리스트로 들어온 경우를 대비한 안전 장치
+    if isinstance(target, list) and len(target) > 0:
+        target = target[0]
+        
+    keyword = target.get('keyword', '상세 가이드')
+    category = target.get('category', '생활정보')
+    
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
     model_id = "gemini-flash-latest"
@@ -199,7 +209,7 @@ def generate_article(target, internal_posts, combined_external_links):
 - 형식: 
   - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
   - 제목: <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
-- 출력: 반드시 유효한 JSON으로 응답하세요."""
+- 출력: 반드시 유효한 JSON으로만 응답하세요."""
     
     user_query = f"내부링크: {selected_int}\n외부링크: {selected_ext}\n키워드: {keyword}"
     
@@ -215,13 +225,18 @@ def generate_article(target, internal_posts, combined_external_links):
         try:
             raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
             data = json.loads(raw_text.strip().replace('```json', '').replace('```', ''))
-            # 필수 데이터 검증
+            
+            # 리스트로 반환된 경우 처리
+            if isinstance(data, list) and len(data) > 0:
+                data = data[0]
+
             if not data.get('title') or not data.get('content'):
                 print("⚠️ AI 응답에 필수 필드(title/content)가 누락되었습니다.")
                 return None
             return data
         except Exception as e:
             print(f"⚠️ 콘텐츠 JSON 파싱 실패: {e}")
+            print(f"응답 텍스트 일부: {raw_text[:200]}")
     return None
 
 # ==========================================
@@ -240,8 +255,8 @@ def get_or_create_term(taxonomy, name, auth):
     return None
 
 def post_article(data, mid):
-    if not data: return False
-    print(f"📢 워드프레스 발행 시도 중: {data.get('title')}", flush=True)
+    if not data or 'title' not in data: return False
+    print(f"📢 워드프레스 발행 시도 중: {data['title']}", flush=True)
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
@@ -289,6 +304,10 @@ def main():
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
+    if not target:
+        print("❌ 키워드 생성 실패")
+        return
+
     combined_external_links = load_external_links_from_json() + get_rss_links(RSS_URLS)
     recent_posts = get_recent_posts()
     
