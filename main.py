@@ -43,7 +43,7 @@ IS_TEST = True
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
 # ==========================================
 def safe_api_call(url, payload, method="POST", timeout=300):
-    """지수 백오프를 적용한 안전한 API 호출 함수 (404 오류 방지 및 디버깅 강화)"""
+    """지수 백오프를 적용한 안전한 API 호출 함수"""
     delays = [1, 2, 4, 8, 16] 
     for i in range(len(delays)):
         try:
@@ -55,8 +55,7 @@ def safe_api_call(url, payload, method="POST", timeout=300):
             if res.status_code == 200:
                 return res
             elif res.status_code == 404:
-                # 404는 경로 문제이므로 재시도 전 로그 출력
-                print(f"⚠️ API 오류 (HTTP 404): 요청 경로를 찾을 수 없습니다. URL: {url}")
+                print(f"⚠️ API 오류 (HTTP 404): 요청 경로를 찾을 수 없습니다. 모델명을 확인하세요. URL: {url}")
                 return None
             elif res.status_code == 429:
                 print(f"⚠️ 할당량 일시 초과(429). {delays[i]}초 후 다시 시도합니다...")
@@ -75,11 +74,11 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        # [수정] 환경 내에서 지원되는 최신 프리뷰 모델 명칭으로 업데이트
-        self.model = "gemini-2.5-flash-preview-09-2025" 
+        # [수정] 항상 최신 버전을 사용하는 모델 명칭 적용
+        self.model = "gemini-1.5-flash-latest" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
-            "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "장애인 고용 지원"],
+            "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "아동 수당 활용", "장애인 고용 지원"],
             "생활정보": ["세무 상식", "법률 상식", "친환경 살림", "저축 방법", "요리 비법"]
         }
 
@@ -87,7 +86,6 @@ class VersatileKeywordEngine:
         selected_cat = random.choice(list(self.categories.keys()))
         seed_topic = random.choice(self.categories[selected_cat])
         
-        # [수정] v1beta 엔드포인트 및 모델 생성 경로 최적화
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         prompt = f"""당신은 SEO 전문가입니다. 분야 '{selected_cat}'의 주제 '{seed_topic}'와 관련하여 
 현재 시점에 유효한 구체적인 '롱테일 키워드' 1개를 생성하세요. 
@@ -162,14 +160,13 @@ def get_recent_posts():
     except: return []
 
 def generate_image_process(prompt):
-    """최신 Imagen 4.0 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
+    """최신 Imagen 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
     print(f"🎨 이미지 생성 중...", flush=True)
-    # [수정] 최신 Imagen 4.0 모델 및 predict 엔드포인트 사용
+    # [수정] 최신 Imagen 4.0 모델 명칭 적용
     model_id = "imagen-4.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
     
     final_prompt = f"High-quality commercial photography for: {prompt}. Featuring a Korean person, professional lighting, clean composition. NO TEXT."
-    # [수정] Imagen 4.0 전용 페이로드 구조
     payload = {
         "instances": [{"prompt": final_prompt}], 
         "parameters": {"sampleCount": 1}
@@ -210,8 +207,8 @@ def generate_article(target, internal_posts, combined_external_links, current_da
     category = target['category']
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
-    # [수정] 텍스트 생성 모델 프리뷰 버전 적용
-    model_id = "gemini-2.5-flash-preview-09-2025"
+    # [수정] 항상 최신 버전을 사용하는 모델 명칭 적용
+    model_id = "gemini-1.5-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
