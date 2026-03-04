@@ -39,12 +39,12 @@ RSS_URLS = [
 # 환경 변수 TEST_MODE가 존재하고, 그 값이 'true'인 경우에만 True로 설정
 # .strip()을 통해 보이지 않는 공백을 제거하고 .lower()로 대소문자 무시
 raw_test_env = os.environ.get('TEST_MODE', 'false').strip().lower()
-IS_TEST = (raw_test_env == 'true')
+IS_TEST = True
 
 # 만약 GitHub Actions 설정이 계속 말을 안 듣는다면, 
 # 아래 줄의 주석(#)을 제거하여 강제로 True를 만드세요.
 # 파이썬은 대문자 'True'를 사용해야 합니다. (소문자 true는 에러 발생)
-IS_TEST = True 
+# IS_TEST = True 
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
