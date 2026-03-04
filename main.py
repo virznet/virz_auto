@@ -35,8 +35,7 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# [수정] 테스트 모드 활성화 (True: 즉시 실행 / False: 랜덤 대기 적용)
-# 이제 GitHub Secret 설정과 관계없이 이 코드 상에서 True로 고정되어 즉시 실행됩니다.
+# [2026-03-04 기준] 테스트 모드 활성화 (True: 즉시 실행 / False: 랜덤 대기 적용)
 IS_TEST = True
 
 # ==========================================
@@ -55,7 +54,7 @@ def safe_api_call(url, payload, method="POST", timeout=300):
             if res.status_code == 200:
                 return res
             elif res.status_code == 404:
-                print(f"⚠️ API 오류 (HTTP 404): URL을 확인하세요. URL: {url}")
+                print(f"⚠️ API 오류 (HTTP 404): 엔드포인트 또는 모델명이 잘못되었습니다. URL: {url}")
                 return None
             elif res.status_code == 429:
                 print(f"⚠️ 할당량 초과(429). {delays[i]}초 후 다시 시도...")
@@ -74,6 +73,7 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
+        # [수정] 2026년 기준 최신 안정화 텍스트 모델 적용
         self.model = "gemini-flash-latest" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
@@ -86,7 +86,7 @@ class VersatileKeywordEngine:
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 합니다."
+        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 합니다. 연도 정보는 제외하세요."
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -98,7 +98,6 @@ class VersatileKeywordEngine:
             try:
                 text = res.json()['candidates'][0]['content']['parts'][0]['text']
                 data = json.loads(text)
-                # [오류 방지] 리스트 형식으로 반환된 경우 첫 번째 요소를 선택
                 if isinstance(data, list) and len(data) > 0:
                     data = data[0]
                 return data
@@ -143,11 +142,16 @@ def get_recent_posts():
     except: return []
 
 def generate_image_process(prompt):
+    """최신 Imagen 4.0 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
     print(f"🎨 이미지 생성 시도 중... (프롬프트: {prompt[:50]}...)", flush=True)
-    model_id = "imagen-3.0-generate-001"
+    
+    # 2026년 기준 최신 이미지 생성 모델 및 엔드포인트 적용
+    model_id = "imagen-4.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
     
     final_prompt = f"Korean person, {prompt}. Professional photography, clean composition, high resolution. NO TEXT."
+    
+    # Imagen 4.0 전용 페이로드 구조
     payload = {
         "instances": [{"prompt": final_prompt}], 
         "parameters": {"sampleCount": 1}
@@ -157,7 +161,7 @@ def generate_image_process(prompt):
     if res:
         try:
             result = res.json()
-            if 'predictions' in result:
+            if 'predictions' in result and len(result['predictions']) > 0:
                 b64_data = result['predictions'][0]['bytesBase64Encoded']
                 img = Image.open(io.BytesIO(base64.b64decode(b64_data)))
                 if img.mode in ("RGBA", "P"): img = img.convert("RGB")
@@ -185,7 +189,6 @@ def upload_to_wp_media(img_data):
 # 5. 고도화된 콘텐츠 생성 (Gutenberg 최적화)
 # ==========================================
 def generate_article(target, internal_posts, combined_external_links):
-    # [오류 방지] target이 리스트로 들어온 경우를 대비한 안전 장치
     if isinstance(target, list) and len(target) > 0:
         target = target[0]
         
@@ -194,6 +197,7 @@ def generate_article(target, internal_posts, combined_external_links):
     
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
     
+    # [수정] 텍스트 모델 최신 버전으로 강제 지정
     model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
@@ -202,7 +206,7 @@ def generate_article(target, internal_posts, combined_external_links):
 
     system_prompt = f"""당신은 {category} 전문 에디터입니다. 구텐베르크 블록 에디터 방식에 최적화된 심층 글을 작성하세요.
 - 분량: 2,500자 이상.
-- 날짜 제외: 연도, 월, 일 정보를 제목과 본문에 포함하지 마세요.
+- 날짜 제외: 2026년 등 연도, 월, 일 정보를 제목과 본문에 포함하지 마세요. (상록수 콘텐츠 지향)
 - 인물: 한국인(Korean person) 기준.
 - 필수 포함 JSON 키: "title", "content", "image_prompt", "category", "tags"
 - 형식: 
@@ -225,7 +229,6 @@ def generate_article(target, internal_posts, combined_external_links):
             raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
             data = json.loads(raw_text.strip().replace('```json', '').replace('```', ''))
             
-            # 리스트로 반환된 경우 처리
             if isinstance(data, list) and len(data) > 0:
                 data = data[0]
 
@@ -297,9 +300,11 @@ def main():
         print(f"⏳ {delay // 60}분 랜덤 대기...", flush=True)
         time.sleep(delay)
 
+    # 2026년 3월 4일 시간 설정
     kst = timezone(timedelta(hours=9))
     current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
 
+    # 키워드 생성
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
     
@@ -307,6 +312,7 @@ def main():
         print("❌ 키워드 생성 실패")
         return
 
+    # 외부 리소스 수집
     combined_external_links = load_external_links_from_json() + get_rss_links(RSS_URLS)
     recent_posts = get_recent_posts()
     
