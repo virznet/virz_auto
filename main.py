@@ -42,7 +42,6 @@ IS_TEST = True
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
 # ==========================================
 def safe_api_call(url, payload, method="POST", timeout=300):
-    """지수 백오프를 적용한 안전한 API 호출 함수"""
     delays = [1, 2, 4, 8, 16] 
     for i in range(len(delays)):
         try:
@@ -54,7 +53,7 @@ def safe_api_call(url, payload, method="POST", timeout=300):
             if res.status_code == 200:
                 return res
             elif res.status_code == 404:
-                print(f"⚠️ API 오류 (HTTP 404): 엔드포인트 또는 모델명이 잘못되었습니다. URL: {url}")
+                print(f"⚠️ API 오류 (HTTP 404): URL: {url}")
                 return None
             elif res.status_code == 429:
                 print(f"⚠️ 할당량 초과(429). {delays[i]}초 후 다시 시도...")
@@ -73,7 +72,6 @@ def safe_api_call(url, payload, method="POST", timeout=300):
 class VersatileKeywordEngine:
     def __init__(self, api_key):
         self.api_key = api_key
-        # 2026년 기준 최신 안정화 텍스트 모델 적용
         self.model = "gemini-flash-latest" 
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
@@ -87,7 +85,6 @@ class VersatileKeywordEngine:
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        # 경제 트렌드를 반영할 수 있도록 프롬프트에 '최신 트렌드' 문구 포함
         prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 최신 트렌드를 반영한 구체적인 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 합니다. 연도 정보는 제외하세요."
 
         payload = {
@@ -144,20 +141,11 @@ def get_recent_posts():
     except: return []
 
 def generate_image_process(prompt):
-    """최신 Imagen 4.0 모델을 사용하여 고품질 이미지를 생성하고 JPG 70% 품질로 최적화"""
     print(f"🎨 이미지 생성 시도 중... (프롬프트: {prompt[:50]}...)", flush=True)
-    
     model_id = "imagen-4.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
-    
-    # 경제 관련일 경우 더 신뢰감 있는 비즈니스 스타일 프롬프트 유도
     final_prompt = f"Korean person, professional business setting, {prompt}. Professional photography, clean composition, high resolution, realistic. NO TEXT."
-    
-    payload = {
-        "instances": [{"prompt": final_prompt}], 
-        "parameters": {"sampleCount": 1}
-    }
-    
+    payload = {"instances": [{"prompt": final_prompt}], "parameters": {"sampleCount": 1}}
     res = safe_api_call(url, payload, timeout=150)
     if res:
         try:
@@ -168,21 +156,17 @@ def generate_image_process(prompt):
                 if img.mode in ("RGBA", "P"): img = img.convert("RGB")
                 output_buffer = io.BytesIO()
                 img.save(output_buffer, format="JPEG", quality=70, optimize=True)
-                print("✅ 이미지 변환 및 최적화 완료 (JPG 70%)")
                 return output_buffer.getvalue()
-        except Exception as e:
-            print(f"⚠️ 이미지 데이터 처리 실패: {e}")
+        except: pass
     return None
 
 def upload_to_wp_media(img_data):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.jpg", "Content-Type": "image/jpeg"}
+    headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.json", "Content-Type": "image/jpeg"}
     try:
         res = requests.post(url, auth=auth, headers=headers, data=img_data, timeout=60)
-        if res.status_code == 201: 
-            print(f"✅ 미디어 업로드 성공 (ID: {res.json()['id']})")
-            return res.json()['id']
+        if res.status_code == 201: return res.json()['id']
     except: pass
     return None
 
@@ -190,34 +174,29 @@ def upload_to_wp_media(img_data):
 # 5. 고도화된 콘텐츠 생성 (Gutenberg 최적화)
 # ==========================================
 def generate_article(target, internal_posts, combined_external_links):
-    if isinstance(target, list) and len(target) > 0:
-        target = target[0]
-        
+    if isinstance(target, list) and len(target) > 0: target = target[0]
     keyword = target.get('keyword', '상세 가이드')
     category = target.get('category', '생활정보')
     
     print(f"🤖 [{category}] 분야 콘텐츠 생성 중: {keyword}", flush=True)
-    
     model_id = "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
     
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
     selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
 
-    # 시스템 프롬프트 강화: 경제 트렌드에 적합한 깊이 있는 분석 요청
+    # Rank Math SEO 포커스 키워드 생성을 위한 지침 추가
     system_prompt = f"""당신은 {category} 전문 에디터입니다. 구텐베르크 블록 에디터 방식에 최적화된 심층 글을 작성하세요.
 - 분량: 2,500자 이상의 풍부한 정보.
-- 날짜 제외: 2026년 등 연도, 월, 일 정보를 제목과 본문에 포함하지 마세요. (상록수 콘텐츠 지향)
+- 날짜 제외: 연도, 월, 일 정보를 포함하지 마세요.
 - 인물: 한국인(Korean person) 기준.
-- 필수 포함 JSON 키: "title", "content", "excerpt", "image_prompt", "category", "tags"
-- 요약문(excerpt): 검색 결과에 노출될 매력적인 150자 내외의 요약문을 작성하세요.
-- 마크다운 금지: 본문(content) 내에 #, ##, **, * 와 같은 마크다운 서식 기호를 절대 사용하지 마세요. 오직 제공된 워드프레스 블록 주석과 표준 HTML 태그만 사용하세요.
-- 형식: 
-  - 문단: <!-- wp:paragraph --><p>내용</p><!-- /wp:paragraph -->
-  - 제목: <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
-- 출력: 반드시 유효한 JSON으로만 응답하세요."""
+- 필수 포함 JSON 키: "title", "content", "excerpt", "focus_keyword", "image_prompt", "category", "tags"
+- focus_keyword: Rank Math SEO 최적화를 위한 가장 핵심적인 단어 1개(예: 허리 디스크 코어 운동).
+- 마크다운 금지: 본문 내에 #, ##, ** 등 기호를 쓰지 말고 HTML 태그만 사용하세요.
+- 형식: 문단 <!-- wp:paragraph -->, 제목 <!-- wp:heading --> 등 블록 주석 사용 필수.
+- 출력: 유효한 JSON."""
     
-    user_query = f"내부링크 리스트: {selected_int}\n외부참조 리스트: {selected_ext}\n타겟 키워드: {keyword}\n\n위 정보를 바탕으로 독자에게 실질적인 도움이 되는 분석 중심의 글을 작성하세요."
+    user_query = f"내부링크: {selected_int}\n외부참조: {selected_ext}\n타겟 키워드: {keyword}"
     
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
@@ -232,15 +211,8 @@ def generate_article(target, internal_posts, combined_external_links):
             raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
             json_str = re.sub(r'^```[a-z]*\n', '', raw_text.strip(), flags=re.IGNORECASE)
             json_str = re.sub(r'\n```$', '', json_str.strip())
-            
             data = json.loads(json_str)
-            
-            if isinstance(data, list) and len(data) > 0:
-                data = data[0]
-
-            if not data.get('title') or not data.get('content'):
-                print("⚠️ AI 응답에 필수 필드(title/content)가 누락되었습니다.")
-                return None
+            if isinstance(data, list) and len(data) > 0: data = data[0]
             return data
         except Exception as e:
             print(f"⚠️ 콘텐츠 JSON 파싱 실패: {e}")
@@ -271,6 +243,7 @@ def post_article(data, mid):
     tag_ids = [get_or_create_term('tags', t, auth) for t in data.get('tags', []) if t]
     tag_ids = [tid for tid in tag_ids if tid]
 
+    # Rank Math SEO 포커스 키워드 적용 (rank_math_focus_keyword 메타 필드)
     payload = {
         "title": data['title'], 
         "content": data['content'], 
@@ -278,13 +251,17 @@ def post_article(data, mid):
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids, 
         "featured_media": mid, 
-        "status": "publish"
+        "status": "publish",
+        "meta": {
+            "rank_math_focus_keyword": data.get('focus_keyword', '')
+        }
     }
     
     try:
         res = requests.post(url, auth=auth, json=payload, timeout=60)
         if res.status_code == 201:
             print(f"🚀 발행 성공: {res.json().get('link')}")
+            print(f"✅ Rank Math 키워드 입력 완료: {data.get('focus_keyword')}")
             return True
         else:
             print(f"❌ 발행 실패: {res.status_code} - {res.text[:200]}")
@@ -296,11 +273,8 @@ def post_article(data, mid):
 # 7. 메인 실행부
 # ==========================================
 def main():
-    if not GEMINI_API_KEY: 
-        print("❌ API 키 누락"); return
-
-    if IS_TEST:
-        print("🛠️ 테스트 모드: 즉시 실행", flush=True)
+    if not GEMINI_API_KEY: print("❌ API 키 누락"); return
+    if IS_TEST: print("🛠️ 테스트 모드: 즉시 실행", flush=True)
     else:
         delay = random.randint(0, 3300)
         print(f"⏳ {delay // 60}분 랜덤 대기...", flush=True)
@@ -308,34 +282,17 @@ def main():
 
     kst = timezone(timedelta(hours=9))
     current_date_str = datetime.now(kst).strftime("%Y년 %m월 %d일")
-
     engine = VersatileKeywordEngine(GEMINI_API_KEY)
     target = engine.generate_target(current_date_str)
-    
-    if not target:
-        print("❌ 키워드 생성 실패")
-        return
-
+    if not target: return
     combined_external_links = load_external_links_from_json() + get_rss_links(RSS_URLS)
     recent_posts = get_recent_posts()
-    
-    # 1. 콘텐츠 생성 및 검증
     data = generate_article(target, recent_posts, combined_external_links)
-    if not data:
-        print("❌ 유효한 콘텐츠가 생성되지 않아 프로세스를 중단합니다.")
-        return
-    
-    # 2. 이미지 생성
+    if not data: return
     mid = None
-    image_prompt = data.get('image_prompt')
-    if image_prompt:
-        img_data = generate_image_process(image_prompt)
-        if img_data: 
-            mid = upload_to_wp_media(img_data)
-    else:
-        print("⚠️ 이미지 프롬프트가 없어 이미지 생성을 건너뜁니다.")
-    
-    # 3. 최종 발행
+    if data.get('image_prompt'):
+        img_data = generate_image_process(data['image_prompt'])
+        if img_data: mid = upload_to_wp_media(img_data)
     post_article(data, mid)
 
 if __name__ == "__main__":
