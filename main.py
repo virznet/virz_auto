@@ -75,7 +75,7 @@ class VersatileKeywordEngine:
         self.model = "gemini-flash-latest" 
         self.categories = {
             "건강정보": ["직장인 만성피로 회복", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
-            "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "아동 수당 활용", "장애인 고용 지원"],
+            "복지정책": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "아동 수당 활용", "장애인 고용 지원"],
             "생활정보": ["세무 상식", "법률 상식", "친환경 살림", "저축 방법", "요리 비법"],
             "경제노트": ["국내외 주식 시장 트렌드", "금리 변화와 부동산 영향", "AI 산업 경제적 파급력", "환율 변동 대비책", "최신 소비 트렌드와 마케팅", "디지털 자산 및 비트코인 전망"]
         }
@@ -85,7 +85,7 @@ class VersatileKeywordEngine:
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 최신 트렌드를 반영한 구체적인 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 합니다. 연도 정보는 제외하세요."
+        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 최신 트렌드를 반영한 구체적인 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 하며 다른 텍스트는 금지합니다."
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -163,19 +163,15 @@ def generate_image_process(prompt):
 def upload_to_wp_media(img_data):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    # [수정] filename 확장자를 .json에서 .jpg로 올바르게 수정 (500 에러 방지)
     headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.jpg", "Content-Type": "image/jpeg"}
     try:
         res = requests.post(url, auth=auth, headers=headers, data=img_data, timeout=60)
         if res.status_code == 201: return res.json()['id']
-        else:
-            print(f"⚠️ 미디어 업로드 실패: {res.status_code} - {res.text[:100]}")
-    except Exception as e:
-        print(f"⚠️ 미디어 업로드 중 예외 발생: {e}")
+    except: pass
     return None
 
 # ==========================================
-# 5. 고도화된 콘텐츠 생성 (Gutenberg 최적화)
+# 5. 고도화된 콘텐츠 생성 (Gutenberg 최적화 및 파싱 강화)
 # ==========================================
 def generate_article(target, internal_posts, combined_external_links):
     if isinstance(target, list) and len(target) > 0: target = target[0]
@@ -196,7 +192,7 @@ def generate_article(target, internal_posts, combined_external_links):
 - 필수 포함 JSON 키: "title", "content", "excerpt", "focus_keyword", "image_prompt", "category", "tags"
 - focus_keyword: Rank Math SEO 최적화를 위한 핵심 단어 1개.
 - 마크다운 금지: HTML 태그와 워드프레스 블록 주석만 사용하세요.
-- 출력: 유효한 JSON."""
+- 중요: 응답은 반드시 순수한 JSON 오브젝트 하나여야 하며, 어떤 부연 설명이나 인사말도 포함하지 마세요."""
     
     user_query = f"내부링크: {selected_int}\n외부참조: {selected_ext}\n타겟 키워드: {keyword}"
     
@@ -211,13 +207,24 @@ def generate_article(target, internal_posts, combined_external_links):
     if res:
         try:
             raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-            json_str = re.sub(r'^```[a-z]*\n', '', raw_text.strip(), flags=re.IGNORECASE)
-            json_str = re.sub(r'\n```$', '', json_str.strip())
+            
+            # [파싱 강화] 텍스트 내에서 JSON 형태만 추출 (Extra data 오류 방지)
+            # 가장 바깥쪽의 { } 블록을 찾아 추출합니다.
+            json_match = re.search(r'(\{.*\})', raw_text.strip(), re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 정규표현식 실패 시 기존 방식 시도
+                json_str = re.sub(r'^```[a-z]*\n', '', raw_text.strip(), flags=re.IGNORECASE)
+                json_str = re.sub(r'\n```$', '', json_str.strip())
+            
             data = json.loads(json_str)
             if isinstance(data, list) and len(data) > 0: data = data[0]
             return data
         except Exception as e:
             print(f"⚠️ 콘텐츠 JSON 파싱 실패: {e}")
+            # 디버깅을 위해 응답의 일부 출력
+            print(f"AI 응답 내용 일부: {raw_text[:300]}...")
     return None
 
 # ==========================================
@@ -262,19 +269,16 @@ def post_article(data, mid):
         res = requests.post(url, auth=auth, json=payload, timeout=60)
         if res.status_code == 201:
             print(f"🚀 발행 성공: {res.json().get('link')}")
-            print(f"✅ Rank Math 키워드 입력 완료: {data.get('focus_keyword')}")
             return True
         elif res.status_code == 500:
-            print(f"❌ 발행 실패(500): 서버 내부 오류. 메타 데이터 연동 문제일 수 있습니다.")
-            # [재시도 로직] 메타 데이터를 제외하고 다시 발행 시도 (성공 확률을 높이기 위함)
-            print("🔄 메타 데이터를 제외하고 재발행을 시도합니다...")
+            print(f"❌ 발행 실패(500): 서버 내부 오류. 메타 데이터 제외 후 재발행을 시도합니다...")
             del payload["meta"]
             res_retry = requests.post(url, auth=auth, json=payload, timeout=60)
             if res_retry.status_code == 201:
                 print(f"🚀 재발행 성공 (메타 제외): {res_retry.json().get('link')}")
                 return True
         else:
-            print(f"❌ 발행 실패: {res.status_code} - {res.text[:200]}")
+            print(f"❌ 발행 실패: {res.status_code}")
     except Exception as e:
         print(f"❌ 발행 중 예외 발생: {e}")
     return False
