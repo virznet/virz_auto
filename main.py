@@ -35,8 +35,8 @@ RSS_URLS = [
     "https://rss.blog.naver.com/moviepotal.xml"
 ]
 
-# [2026-03-04 기준] 테스트 모드 활성화 (True: 즉시 실행 / False: 랜덤 대기 적용)
-IS_TEST = False
+# [2026-03-05 기준] 테스트 모드 활성화 (True: 즉시 실행 / False: 랜덤 대기 적용)
+IS_TEST = True
 
 # ==========================================
 # 2. 공통 유틸리티 (Tier 1 최적화 지수 백오프)
@@ -78,7 +78,8 @@ class VersatileKeywordEngine:
         self.categories = {
             "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
             "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "아동 수당 활용", "장애인 고용 지원"],
-            "생활정보": ["세무 상식", "법률 상식", "친환경 살림", "저축 방법", "요리 비법"]
+            "생활정보": ["세무 상식", "법률 상식", "친환경 살림", "저축 방법", "요리 비법"],
+            "경제노트": ["국내외 주식 시장 트렌드", "금리 변화와 부동산 영향", "AI 산업 경제적 파급력", "환율 변동 대비책", "최신 소비 트렌드와 마케팅", "디지털 자산 및 비트코인 전망"]
         }
 
     def generate_target(self, current_date):
@@ -86,7 +87,8 @@ class VersatileKeywordEngine:
         seed_topic = random.choice(self.categories[selected_cat])
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 합니다. 연도 정보는 제외하세요."
+        # 경제 트렌드를 반영할 수 있도록 프롬프트에 '최신 트렌드' 문구 포함
+        prompt = f"당신은 SEO 전문가입니다. '{selected_cat}' 분야의 '{seed_topic}'와 관련된 최신 트렌드를 반영한 구체적인 롱테일 키워드 1개를 JSON으로 생성하세요. 결과는 반드시 {{'keyword': '...', 'category': '...'}} 형식이어야 합니다. 연도 정보는 제외하세요."
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -102,7 +104,7 @@ class VersatileKeywordEngine:
                     data = data[0]
                 return data
             except: pass
-        return {"keyword": f"{seed_topic} 상세 가이드", "category": selected_cat}
+        return {"keyword": f"{seed_topic} 상세 분석", "category": selected_cat}
 
 # ==========================================
 # 4. 워드프레스 및 이미지 처리 & 링크 수집
@@ -148,7 +150,8 @@ def generate_image_process(prompt):
     model_id = "imagen-4.0-generate-001"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict?key={GEMINI_API_KEY}"
     
-    final_prompt = f"Korean person, {prompt}. Professional photography, clean composition, high resolution. NO TEXT."
+    # 경제 관련일 경우 더 신뢰감 있는 비즈니스 스타일 프롬프트 유도
+    final_prompt = f"Korean person, professional business setting, {prompt}. Professional photography, clean composition, high resolution, realistic. NO TEXT."
     
     payload = {
         "instances": [{"prompt": final_prompt}], 
@@ -201,9 +204,9 @@ def generate_article(target, internal_posts, combined_external_links):
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
     selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
 
-    # 시스템 프롬프트 강화: 마크다운 기호 사용 금지 및 요약문(excerpt) 필수 포함
+    # 시스템 프롬프트 강화: 경제 트렌드에 적합한 깊이 있는 분석 요청
     system_prompt = f"""당신은 {category} 전문 에디터입니다. 구텐베르크 블록 에디터 방식에 최적화된 심층 글을 작성하세요.
-- 분량: 2,500자 이상.
+- 분량: 2,500자 이상의 풍부한 정보.
 - 날짜 제외: 2026년 등 연도, 월, 일 정보를 제목과 본문에 포함하지 마세요. (상록수 콘텐츠 지향)
 - 인물: 한국인(Korean person) 기준.
 - 필수 포함 JSON 키: "title", "content", "excerpt", "image_prompt", "category", "tags"
@@ -214,7 +217,7 @@ def generate_article(target, internal_posts, combined_external_links):
   - 제목: <!-- wp:heading {{"level":2}} --><h2>제목</h2><!-- /wp:heading -->
 - 출력: 반드시 유효한 JSON으로만 응답하세요."""
     
-    user_query = f"내부링크: {selected_int}\n외부링크: {selected_ext}\n키워드: {keyword}"
+    user_query = f"내부링크 리스트: {selected_int}\n외부참조 리스트: {selected_ext}\n타겟 키워드: {keyword}\n\n위 정보를 바탕으로 독자에게 실질적인 도움이 되는 분석 중심의 글을 작성하세요."
     
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
@@ -227,7 +230,6 @@ def generate_article(target, internal_posts, combined_external_links):
     if res:
         try:
             raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
-            # JSON 외의 마크다운 래퍼(```json 등) 제거 로직 강화
             json_str = re.sub(r'^```[a-z]*\n', '', raw_text.strip(), flags=re.IGNORECASE)
             json_str = re.sub(r'\n```$', '', json_str.strip())
             
@@ -242,7 +244,6 @@ def generate_article(target, internal_posts, combined_external_links):
             return data
         except Exception as e:
             print(f"⚠️ 콘텐츠 JSON 파싱 실패: {e}")
-            print(f"응답 텍스트 일부: {raw_text[:200]}")
     return None
 
 # ==========================================
@@ -273,7 +274,7 @@ def post_article(data, mid):
     payload = {
         "title": data['title'], 
         "content": data['content'], 
-        "excerpt": data.get('excerpt', ''), # 요약문 필드 추가
+        "excerpt": data.get('excerpt', ''),
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids, 
         "featured_media": mid, 
