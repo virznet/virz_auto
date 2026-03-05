@@ -74,7 +74,7 @@ class VersatileKeywordEngine:
         self.api_key = api_key
         self.model = "gemini-flash-latest" 
         self.categories = {
-            "건강정보": ["만성 질환 예방", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
+            "건강정보": ["직장인 만성피로 회복", "필수 영양제 가이드", "심리 상담", "재활 운동", "수면 장애 극복"],
             "복지정보": ["정부 지원금 신청", "시니어 복지", "청년 주거 지원", "육아 휴직 활용", "아동 수당 활용", "장애인 고용 지원"],
             "생활정보": ["세무 상식", "법률 상식", "친환경 살림", "저축 방법", "요리 비법"],
             "경제노트": ["국내외 주식 시장 트렌드", "금리 변화와 부동산 영향", "AI 산업 경제적 파급력", "환율 변동 대비책", "최신 소비 트렌드와 마케팅", "디지털 자산 및 비트코인 전망"]
@@ -163,11 +163,15 @@ def generate_image_process(prompt):
 def upload_to_wp_media(img_data):
     url = f"{WP_BASE_URL.rstrip('/')}/wp-json/wp/v2/media"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.json", "Content-Type": "image/jpeg"}
+    # [수정] filename 확장자를 .json에서 .jpg로 올바르게 수정 (500 에러 방지)
+    headers = {"Content-Disposition": f"attachment; filename=auto_{int(time.time())}.jpg", "Content-Type": "image/jpeg"}
     try:
         res = requests.post(url, auth=auth, headers=headers, data=img_data, timeout=60)
         if res.status_code == 201: return res.json()['id']
-    except: pass
+        else:
+            print(f"⚠️ 미디어 업로드 실패: {res.status_code} - {res.text[:100]}")
+    except Exception as e:
+        print(f"⚠️ 미디어 업로드 중 예외 발생: {e}")
     return None
 
 # ==========================================
@@ -185,15 +189,13 @@ def generate_article(target, internal_posts, combined_external_links):
     selected_int = random.sample(internal_posts, min(len(internal_posts), 2)) if internal_posts else []
     selected_ext = random.sample(combined_external_links, min(len(combined_external_links), 3))
 
-    # Rank Math SEO 포커스 키워드 생성을 위한 지침 추가
     system_prompt = f"""당신은 {category} 전문 에디터입니다. 구텐베르크 블록 에디터 방식에 최적화된 심층 글을 작성하세요.
 - 분량: 2,500자 이상의 풍부한 정보.
 - 날짜 제외: 연도, 월, 일 정보를 포함하지 마세요.
 - 인물: 한국인(Korean person) 기준.
 - 필수 포함 JSON 키: "title", "content", "excerpt", "focus_keyword", "image_prompt", "category", "tags"
-- focus_keyword: Rank Math SEO 최적화를 위한 가장 핵심적인 단어 1개(예: 허리 디스크 코어 운동).
-- 마크다운 금지: 본문 내에 #, ##, ** 등 기호를 쓰지 말고 HTML 태그만 사용하세요.
-- 형식: 문단 <!-- wp:paragraph -->, 제목 <!-- wp:heading --> 등 블록 주석 사용 필수.
+- focus_keyword: Rank Math SEO 최적화를 위한 핵심 단어 1개.
+- 마크다운 금지: HTML 태그와 워드프레스 블록 주석만 사용하세요.
 - 출력: 유효한 JSON."""
     
     user_query = f"내부링크: {selected_int}\n외부참조: {selected_ext}\n타겟 키워드: {keyword}"
@@ -243,7 +245,6 @@ def post_article(data, mid):
     tag_ids = [get_or_create_term('tags', t, auth) for t in data.get('tags', []) if t]
     tag_ids = [tid for tid in tag_ids if tid]
 
-    # Rank Math SEO 포커스 키워드 적용 (rank_math_focus_keyword 메타 필드)
     payload = {
         "title": data['title'], 
         "content": data['content'], 
@@ -263,6 +264,15 @@ def post_article(data, mid):
             print(f"🚀 발행 성공: {res.json().get('link')}")
             print(f"✅ Rank Math 키워드 입력 완료: {data.get('focus_keyword')}")
             return True
+        elif res.status_code == 500:
+            print(f"❌ 발행 실패(500): 서버 내부 오류. 메타 데이터 연동 문제일 수 있습니다.")
+            # [재시도 로직] 메타 데이터를 제외하고 다시 발행 시도 (성공 확률을 높이기 위함)
+            print("🔄 메타 데이터를 제외하고 재발행을 시도합니다...")
+            del payload["meta"]
+            res_retry = requests.post(url, auth=auth, json=payload, timeout=60)
+            if res_retry.status_code == 201:
+                print(f"🚀 재발행 성공 (메타 제외): {res_retry.json().get('link')}")
+                return True
         else:
             print(f"❌ 발행 실패: {res.status_code} - {res.text[:200]}")
     except Exception as e:
